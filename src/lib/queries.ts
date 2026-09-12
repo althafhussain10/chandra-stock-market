@@ -95,6 +95,23 @@ export function useLatestPrices() {
   });
 }
 
+export function useDailyCandles(ticker: string | null) {
+  return useQuery({
+    queryKey: ["daily_candles", ticker],
+    enabled: Boolean(ticker),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("daily_candles")
+        .select("date,open,high,low,close,volume")
+        .eq("ticker", ticker!)
+        .order("date", { ascending: false })
+        .limit(180);
+      if (error) throw error;
+      return [...(data ?? [])].reverse();
+    },
+  });
+}
+
 export function useWatchlist() {
   return useQuery({
     queryKey: ["watchlist"],

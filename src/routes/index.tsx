@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Search, Star, ShieldAlert, Menu, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, Star, ShieldAlert, Menu, TrendingUp, TrendingDown, LineChart as LineChartIcon } from "lucide-react";
 import { toast } from "sonner";
+import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Brand } from "@/components/Brand";
 import { RefreshButton } from "@/components/RefreshButton";
 import { DataTable, type Column } from "@/components/DataTable";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   FUNDAMENTAL_TABS,
   SCREENER_TABS,
@@ -21,6 +23,7 @@ import {
 } from "@/lib/screener-meta";
 import {
   useFundamentals,
+  useDailyCandles,
   useLatestPrices,
   useResultCounts,
   useResults,
@@ -437,6 +440,69 @@ function Pct({ value }: { value: number | null | undefined }) {
   );
 }
 
+type CandlePoint = { date: string; open: number; high: number; low: number; close: number; volume: number };
+
+function findLevel(points: CandlePoint[], kind: "support" | "resistance") {
+  if (points.length < 7) return null;
+  const candidates: number[] = [];
+  for (let i = 2; i < points.length - 2; i++) {
+    const value = kind === "support" ? points[i].low : points[i].high;
+    const neighbors = points.slice(i - 2, i + 3).map((p) => (kind === "support" ? p.low : p.high));
+    const isPivot = kind === "support" ? value === Math.min(...neighbors) : value === Math.max(...neighbors);
+    if (isPivot) candidates.push(value);
+  }
+  const latest = points[points.length - 1].close;
+  const eligible = candidates.filter((level) => (kind === "support" ? level < latest : level > latest));
+  if (!eligible.length) return null;
+  return kind === "support" ? Math.max(...eligible) : Math.min(...eligible);
+}
+
+function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }) {
+  const { data, isLoading, error } = useDailyCandles(ticker);
+  const points = (data ?? []) as CandlePoint[];
+  const support = findLevel(points, "support");
+  const resistance = findLevel(points, "resistance");
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="num">{ticker.replace(".NS", "")}</span>
+            <span className="text-sm font-normal text-muted-foreground">Daily price levels</span>
+          </DialogTitle>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">Loading candles...</div>
+        ) : error ? (
+          <div className="flex h-80 items-center justify-center text-sm text-destructive">Could not load chart data.</div>
+        ) : points.length < 7 ? (
+          <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">Not enough candle data.</div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-4 text-xs">
+              <span className="flex items-center gap-2 text-up"><i className="h-0.5 w-5 bg-up" /> Support {support == null ? "—" : fmtNum(support)}</span>
+              <span className="flex items-center gap-2 text-down"><i className="h-0.5 w-5 bg-down" /> Resistance {resistance == null ? "—" : fmtNum(resistance)}</span>
+            </div>
+            <div className="h-80 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={points} margin={{ top: 12, right: 18, left: 4, bottom: 4 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(value) => String(value).slice(5)} minTickGap={36} />
+                  <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={58} tickFormatter={(value) => fmtNum(value, 0)} />
+                  <Tooltip labelFormatter={(value) => String(value)} formatter={(value: number) => [fmtNum(value), "Close"]} />
+                  <Line type="monotone" dataKey="close" stroke="var(--color-chart-2)" strokeWidth={2} dot={false} />
+                  {support != null && <ReferenceLine y={support} stroke="var(--color-up)" strokeDasharray="6 4" label={{ value: "SUPPORT", fill: "var(--color-up)", fontSize: 10 }} />}
+                  {resistance != null && <ReferenceLine y={resistance} stroke="var(--color-down)" strokeDasharray="6 4" label={{ value: "RESISTANCE", fill: "var(--color-down)", fontSize: 10 }} />}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 type ResultRow = { ticker: string; trigger_date: string; details: any; created_at: string };
 
 function ScreenerPanel({
@@ -457,6 +523,7 @@ function ScreenerPanel({
   const meta = SCREENER_TABS.find((t) => t.key === screener)!;
   const { data, isLoading, error } = useResults(screener);
   const rows = (data ?? []) as ResultRow[];
+  const [chartTicker, setChartTicker] = useState<string | null>(null);
 
   const starCol: Column<ResultRow> = {
     key: "star",
@@ -469,6 +536,16 @@ function ScreenerPanel({
         className="transition-colors hover:text-warn"
       >
         <Star className={cn("size-4", starred.has(r.ticker) ? "fill-warn text-warn" : "text-muted-foreground")} />
+      </button>
+    ),
+  };
+  const chartCol: Column<ResultRow> = {
+    key: "chart",
+    header: "Chart",
+    value: () => 0,
+    render: (r) => (
+      <button type="button" onClick={() => setChartTicker(r.ticker)} aria-label={`Open chart for ${r.ticker}`} className="text-muted-foreground hover:text-primary">
+        <LineChartIcon className="size-4" />
       </button>
     ),
   };
@@ -510,6 +587,7 @@ function ScreenerPanel({
   let columns: Column<ResultRow>[] = [];
   if (screener === "ath_breakout") {
     columns = [
+      chartCol,
       starCol,
       tickerCol,
       { key: "close", header: "Close", align: "right", numeric: true, value: (r) => Number(r.details?.trigger_close), render: (r) => fmtNum(r.details?.trigger_close) },
@@ -520,6 +598,7 @@ function ScreenerPanel({
     ];
   } else if (screener === "monthly_ema20") {
     columns = [
+      chartCol,
       starCol,
       tickerCol,
       { key: "ema", header: "Monthly EMA20", align: "right", numeric: true, value: (r) => Number(r.details?.monthly_ema20), render: (r) => fmtNum(r.details?.monthly_ema20) },
@@ -532,6 +611,7 @@ function ScreenerPanel({
     ];
   } else if (screener === "todays_breakout") {
     columns = [
+      chartCol,
       starCol,
       tickerCol,
       { key: "close", header: "Close", align: "right", numeric: true, value: (r) => Number(r.details?.trigger_close), render: (r) => fmtNum(r.details?.trigger_close) },
@@ -544,6 +624,7 @@ function ScreenerPanel({
     ];
   } else if (screener === "high_volume") {
     columns = [
+      chartCol,
       starCol,
       { key: "rank", header: "#", align: "right", numeric: true, value: (r) => Number(r.details?.rank) },
       tickerCol,
@@ -603,6 +684,7 @@ function ScreenerPanel({
           emptyLabel="No matches yet — hit Refresh Data to run the screeners."
         />
       )}
+      {chartTicker && <StockChart ticker={chartTicker} onClose={() => setChartTicker(null)} />}
     </section>
   );
 }
