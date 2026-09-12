@@ -1,5 +1,5 @@
-import logo from "@/assets/chandra-logo.png.asset.json";
+import logo from "/public/chandra-logo.png";
 
 export function Brand({ className = "" }: { className?: string }) {
-  return <img src={logo.url} alt="Chandra stock screener" className={`h-7 w-auto ${className}`} />;
+  return <img src={logo} alt="Chandra stock screener" className={`h-7 w-auto ${className}`} />;
 }
