@@ -82,7 +82,7 @@ function AdminPage() {
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-admin/40 bg-background/95 px-4 backdrop-blur">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-admin/40 bg-background/95 px-4 pr-4 md:pr-32 backdrop-blur">
           <span className="rounded bg-admin px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-admin-foreground">
             Admin
           </span>

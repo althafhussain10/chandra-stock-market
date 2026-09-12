@@ -13,31 +13,44 @@ export type ScreenerName = (typeof SCREENERS)[number];
 
 type Row = { ticker: string; date: string; open: number; high: number; low: number; close: number; volume: number };
 
+const dailyCache = new WeakMap<object, Promise<Map<string, Row[]>>>();
+
 async function loadDaily(db: SupabaseClient<any>, days: number) {
   const since = new Date();
   since.setDate(since.getDate() - days);
   const iso = since.toISOString().slice(0, 10);
-  const all: Row[] = [];
-  const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await db
-      .from("daily_candles")
-      .select("ticker,date,open,high,low,close,volume")
-      .gte("date", iso)
-      .order("ticker")
-      .order("date")
-      .range(from, from + pageSize - 1);
-    if (error) throw new Error(error.message);
-    all.push(...((data ?? []) as Row[]));
-    if (!data || data.length < pageSize) break;
+  let cached = dailyCache.get(db);
+  if (!cached) {
+    cached = (async () => {
+      const all: Row[] = [];
+      const pageSize = 1000;
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await db
+          .from("daily_candles")
+          .select("ticker,date,open,high,low,close,volume")
+          .gte("date", iso)
+          .order("ticker")
+          .order("date")
+          .range(from, from + pageSize - 1);
+        if (error) throw new Error(error.message);
+        all.push(...((data ?? []) as Row[]));
+        if (!data || data.length < pageSize) break;
+      }
+      const byTicker = new Map<string, Row[]>();
+      for (const r of all) {
+        const arr = byTicker.get(r.ticker);
+        if (arr) arr.push(r);
+        else byTicker.set(r.ticker, [r]);
+      }
+      return byTicker;
+    })();
+    dailyCache.set(db, cached);
   }
-  const byTicker = new Map<string, Row[]>();
-  for (const r of all) {
-    const arr = byTicker.get(r.ticker);
-    if (arr) arr.push(r);
-    else byTicker.set(r.ticker, [r]);
-  }
-  return byTicker;
+
+  const allByTicker = await cached;
+  return new Map(
+    [...allByTicker.entries()].map(([ticker, rows]) => [ticker, rows.filter((row) => row.date >= iso)]),
+  );
 }
 
 async function activeTickers(db: SupabaseClient<any>) {

@@ -372,7 +372,7 @@ function Dashboard() {
 
       {/* Main */}
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-background/95 px-4 pr-4 md:pr-32 backdrop-blur">
           <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setNavOpen(true)}>
             <Menu className="size-5" />
           </Button>

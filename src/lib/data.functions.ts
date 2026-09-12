@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-async function admin() {
+async function admin(context?: any) {
+  if (context?.supabase) return context.supabase;
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
 }
@@ -21,7 +22,7 @@ export const seedUniverse = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
   await assertAdmin(context);
-  const db = await admin();
+  const db = await admin(context);
   const inserted = await ensureUniverse(db);
   return { inserted };
   });
@@ -43,7 +44,7 @@ export const refreshChunk = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data, context }) => {
     await assertAdmin(context);
-    const db = await admin();
+    const db = await admin(context);
     await ensureUniverse(db);
     const { refreshMarketData } = await import("./pipeline.server");
     const { data: cfg } = await db
@@ -64,7 +65,7 @@ export const runAllScreeners = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
   await assertAdmin(context);
-  const db = await admin();
+  const db = await admin(context);
   const { runScreener, logRun } = await import("./screeners.server");
   const { data: configs } = await db.from("screener_configs").select("*").order("sort_order");
   const out: Record<string, number | string> = {};
@@ -98,7 +99,7 @@ export const runOneScreener = createServerFn({ method: "POST" })
       _role: "admin",
     });
     if (!isAdmin) throw new Error("Forbidden");
-    const db = await admin();
+    const db = await admin(context);
     const { runScreener, logRun, SCREENERS } = await import("./screeners.server");
     if (!(SCREENERS as readonly string[]).includes(data.name)) throw new Error("Unknown screener");
     const { data: cfg } = await db
