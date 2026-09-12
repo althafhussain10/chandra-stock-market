@@ -110,18 +110,31 @@ export function useFundamentals(statement: string) {
   return useQuery({
     queryKey: ["fundamentals", statement],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("fundamental_statements")
-        .select("ticker,metrics,fiscal_year")
-        .eq("statement_type", statement)
-        .order("fiscal_year", { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      return (data ?? []).map((row) => ({
-        ticker: row.ticker,
-        fiscalYear: row.fiscal_year,
-        metrics: row.metrics ?? {},
-      }));
+      try {
+        const { data, error } = await supabase
+          .from("fundamental_statements")
+          .select("ticker,metrics,fiscal_year")
+          .eq("statement_type", statement)
+          .order("fiscal_year", { ascending: false })
+          .limit(200);
+        if (error) throw error;
+        return (data ?? []).map((row) => ({
+          ticker: row.ticker,
+          fiscalYear: row.fiscal_year,
+          metrics: row.metrics ?? {},
+        }));
+      } catch (error: any) {
+        const message = String(error?.message ?? error ?? "");
+        if (
+          message.includes("fundamental_statements") ||
+          message.includes("does not exist") ||
+          message.includes("schema cache") ||
+          message.includes("42P01")
+        ) {
+          return [];
+        }
+        throw error;
+      }
     },
   });
 }

@@ -120,11 +120,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function ThemeToggleButton() {
   const prefersDark = typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
-  const [dark, setDark] = useState(prefersDark);
+  const [dark, setDark] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
-    const isDark = saved ? saved === "dark" : prefersDark;
+    const isDark = saved ? saved === "dark" : false;
     setDark(isDark);
     document.documentElement.classList.toggle("dark", isDark);
   }, [prefersDark]);

@@ -619,8 +619,9 @@ function FundamentalPanel({
   const meta = FUNDAMENTAL_TABS.find((t) => t.key === statement)!;
   const { data, isLoading, error } = useFundamentals(statement);
   const fallbackRows = FUNDAMENTAL_DATA[statement] as Array<Record<string, any>>;
-  const rows = (data ?? fallbackRows).map((row) => ({
-    ...row.metrics,
+  const sourceRows = data && data.length > 0 ? data : fallbackRows;
+  const rows = sourceRows.map((row) => ({
+    ...(row.metrics ?? row),
     ticker: row.ticker,
     sector: nameOf[row.ticker]?.sector ?? row.sector ?? "",
     name: nameOf[row.ticker]?.name ?? row.name ?? "",
