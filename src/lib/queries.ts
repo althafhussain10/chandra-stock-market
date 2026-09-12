@@ -106,6 +106,26 @@ export function useWatchlist() {
   });
 }
 
+export function useFundamentals(statement: string) {
+  return useQuery({
+    queryKey: ["fundamentals", statement],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("fundamental_statements")
+        .select("ticker,metrics,fiscal_year")
+        .eq("statement_type", statement)
+        .order("fiscal_year", { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        ticker: row.ticker,
+        fiscalYear: row.fiscal_year,
+        metrics: row.metrics ?? {},
+      }));
+    },
+  });
+}
+
 export function useRunLogs(filters: { job?: string; from?: string; to?: string } = {}) {
   return useQuery({
     queryKey: ["run_logs", filters],

@@ -11,8 +11,16 @@ import { cn } from "@/lib/utils";
 import { Brand } from "@/components/Brand";
 import { RefreshButton } from "@/components/RefreshButton";
 import { DataTable, type Column } from "@/components/DataTable";
-import { SCREENER_TABS, fmtInt, fmtNum, type ScreenerKey } from "@/lib/screener-meta";
 import {
+  FUNDAMENTAL_TABS,
+  SCREENER_TABS,
+  fmtInt,
+  fmtNum,
+  type FundamentalKey,
+  type ScreenerKey,
+} from "@/lib/screener-meta";
+import {
+  useFundamentals,
   useLatestPrices,
   useResultCounts,
   useResults,
@@ -42,7 +50,186 @@ export const Route = createFileRoute("/")({
   component: Dashboard,
 });
 
-type TabKey = ScreenerKey | "watchlist";
+type TabKey = ScreenerKey | FundamentalKey | "watchlist";
+
+const FUNDAMENTAL_DATA = {
+  profit_loss: [
+    {
+      ticker: "RELIANCE",
+      name: "Reliance Industries",
+      sector: "Energy",
+      revenue: 276400,
+      ebitda: 44800,
+      operatingProfit: 36750,
+      netProfit: 21440,
+      margin: 18.4,
+      growth: 11.2,
+    },
+    {
+      ticker: "TCS",
+      name: "Tata Consultancy Services",
+      sector: "IT",
+      revenue: 186420,
+      ebitda: 48520,
+      operatingProfit: 43360,
+      netProfit: 35210,
+      margin: 24.8,
+      growth: 9.6,
+    },
+    {
+      ticker: "HDFCBANK",
+      name: "HDFC Bank",
+      sector: "Financial Services",
+      revenue: 108350,
+      ebitda: 33210,
+      operatingProfit: 31840,
+      netProfit: 24680,
+      margin: 31.4,
+      growth: 13.7,
+    },
+    {
+      ticker: "INFY",
+      name: "Infosys",
+      sector: "IT",
+      revenue: 164480,
+      ebitda: 44660,
+      operatingProfit: 41010,
+      netProfit: 31980,
+      margin: 26.7,
+      growth: 8.9,
+    },
+    {
+      ticker: "ICICIBANK",
+      name: "ICICI Bank",
+      sector: "Financial Services",
+      revenue: 98960,
+      ebitda: 30120,
+      operatingProfit: 28740,
+      netProfit: 21810,
+      margin: 29.5,
+      growth: 12.4,
+    },
+  ],
+  balance_sheet: [
+    {
+      ticker: "RELIANCE",
+      name: "Reliance Industries",
+      sector: "Energy",
+      totalAssets: 728600,
+      totalEquity: 374200,
+      debt: 126400,
+      cash: 28800,
+      currentRatio: 1.62,
+      netDebtToEbitda: 1.8,
+    },
+    {
+      ticker: "TCS",
+      name: "Tata Consultancy Services",
+      sector: "IT",
+      totalAssets: 214500,
+      totalEquity: 142900,
+      debt: 18060,
+      cash: 24200,
+      currentRatio: 2.97,
+      netDebtToEbitda: 0.3,
+    },
+    {
+      ticker: "HDFCBANK",
+      name: "HDFC Bank",
+      sector: "Financial Services",
+      totalAssets: 3124000,
+      totalEquity: 297700,
+      debt: 420300,
+      cash: 274500,
+      currentRatio: 0.94,
+      netDebtToEbitda: 4.1,
+    },
+    {
+      ticker: "INFY",
+      name: "Infosys",
+      sector: "IT",
+      totalAssets: 161200,
+      totalEquity: 104700,
+      debt: 10400,
+      cash: 19750,
+      currentRatio: 2.36,
+      netDebtToEbitda: 0.2,
+    },
+    {
+      ticker: "ICICIBANK",
+      name: "ICICI Bank",
+      sector: "Financial Services",
+      totalAssets: 2436200,
+      totalEquity: 262850,
+      debt: 335000,
+      cash: 226000,
+      currentRatio: 1.12,
+      netDebtToEbitda: 3.6,
+    },
+  ],
+  cash_flow: [
+    {
+      ticker: "RELIANCE",
+      name: "Reliance Industries",
+      sector: "Energy",
+      operatingCashFlow: 29120,
+      investingCashFlow: -16650,
+      financingCashFlow: -11380,
+      freeCashFlow: 17210,
+      capex: 12740,
+      netCashFlow: 1090,
+      cfoMargin: 22.9,
+    },
+    {
+      ticker: "TCS",
+      name: "Tata Consultancy Services",
+      sector: "IT",
+      operatingCashFlow: 38740,
+      investingCashFlow: -5420,
+      financingCashFlow: -26110,
+      freeCashFlow: 29110,
+      capex: 4100,
+      netCashFlow: 7210,
+      cfoMargin: 28.1,
+    },
+    {
+      ticker: "HDFCBANK",
+      name: "HDFC Bank",
+      sector: "Financial Services",
+      operatingCashFlow: 25560,
+      investingCashFlow: -1980,
+      financingCashFlow: -21490,
+      freeCashFlow: 23360,
+      capex: 2200,
+      netCashFlow: 2090,
+      cfoMargin: 29.7,
+    },
+    {
+      ticker: "INFY",
+      name: "Infosys",
+      sector: "IT",
+      operatingCashFlow: 33140,
+      investingCashFlow: -3810,
+      financingCashFlow: -24420,
+      freeCashFlow: 28290,
+      capex: 4300,
+      netCashFlow: 4910,
+      cfoMargin: 26.4,
+    },
+    {
+      ticker: "ICICIBANK",
+      name: "ICICI Bank",
+      sector: "Financial Services",
+      operatingCashFlow: 21930,
+      investingCashFlow: -1470,
+      financingCashFlow: -16610,
+      freeCashFlow: 19140,
+      capex: 2790,
+      netCashFlow: 3850,
+      cfoMargin: 27.8,
+    },
+  ],
+} as const;
 
 function Dashboard() {
   const [tab, setTab] = useState<TabKey>("ath_breakout");
@@ -116,6 +303,29 @@ function Dashboard() {
               <span className="truncate pr-2">{t.label}</span>
               <span className="num rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">
                 {counts.data?.[t.key] ?? 0}
+              </span>
+            </button>
+          ))}
+          <p className="px-2 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Fundamentals
+          </p>
+          {FUNDAMENTAL_TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => {
+                setTab(t.key);
+                setNavOpen(false);
+              }}
+              className={cn(
+                "flex items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors",
+                tab === t.key
+                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                  : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+              )}
+            >
+              <span className="truncate pr-2">{t.label}</span>
+              <span className="num rounded bg-emerald/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                {FUNDAMENTAL_DATA[t.key].length}
               </span>
             </button>
           ))}
@@ -197,6 +407,8 @@ function Dashboard() {
               search={search}
               onStar={toggleStar}
             />
+          ) : tab === "profit_loss" || tab === "balance_sheet" || tab === "cash_flow" ? (
+            <FundamentalPanel statement={tab} search={search} nameOf={nameOf} />
           ) : (
             <ScreenerPanel
               screener={tab}
@@ -389,6 +601,94 @@ function ScreenerPanel({
           search={search}
           initialSort={{ key: screener === "sector_strength" || screener === "high_volume" ? "rank" : "date", dir: screener === "sector_strength" || screener === "high_volume" ? "asc" : "desc" }}
           emptyLabel="No matches yet — hit Refresh Data to run the screeners."
+        />
+      )}
+    </section>
+  );
+}
+
+function FundamentalPanel({
+  statement,
+  search,
+  nameOf,
+}: {
+  statement: FundamentalKey;
+  search: string;
+  nameOf: Record<string, any>;
+}) {
+  const meta = FUNDAMENTAL_TABS.find((t) => t.key === statement)!;
+  const { data, isLoading, error } = useFundamentals(statement);
+  const fallbackRows = FUNDAMENTAL_DATA[statement] as Array<Record<string, any>>;
+  const rows = (data ?? fallbackRows).map((row) => ({
+    ...row.metrics,
+    ticker: row.ticker,
+    sector: nameOf[row.ticker]?.sector ?? row.sector ?? "",
+    name: nameOf[row.ticker]?.name ?? row.name ?? "",
+  }));
+
+  const money = (value: number | null | undefined) =>
+    value == null || Number.isNaN(Number(value)) ? "—" : `₹${Number(value).toLocaleString("en-IN", { maximumFractionDigits: 0 })} Cr`;
+
+  const shareCols: Column<any>[] =
+    statement === "profit_loss"
+      ? [
+          { key: "ticker", header: "Ticker", value: (r) => r.ticker, render: (r) => <span className="num font-medium">{r.ticker}</span> },
+          { key: "sector", header: "Sector", value: (r) => r.sector },
+          { key: "revenue", header: "Revenue", align: "right", numeric: true, value: (r) => Number(r.revenue), render: (r) => money(r.revenue) },
+          { key: "ebitda", header: "EBITDA", align: "right", numeric: true, value: (r) => Number(r.ebitda), render: (r) => money(r.ebitda) },
+          { key: "operatingProfit", header: "Operating Profit", align: "right", numeric: true, value: (r) => Number(r.operatingProfit), render: (r) => money(r.operatingProfit) },
+          { key: "netProfit", header: "Net Profit", align: "right", numeric: true, value: (r) => Number(r.netProfit), render: (r) => money(r.netProfit) },
+          { key: "margin", header: "EBITDA Margin", align: "right", numeric: true, value: (r) => Number(r.margin), render: (r) => <Pct value={r.margin} /> },
+          { key: "growth", header: "YoY Growth", align: "right", numeric: true, value: (r) => Number(r.growth), render: (r) => <Pct value={r.growth} /> },
+        ]
+      : statement === "balance_sheet"
+        ? [
+            { key: "ticker", header: "Ticker", value: (r) => r.ticker, render: (r) => <span className="num font-medium">{r.ticker}</span> },
+            { key: "sector", header: "Sector", value: (r) => r.sector },
+            { key: "totalAssets", header: "Total Assets", align: "right", numeric: true, value: (r) => Number(r.totalAssets), render: (r) => money(r.totalAssets) },
+            { key: "totalEquity", header: "Equity", align: "right", numeric: true, value: (r) => Number(r.totalEquity), render: (r) => money(r.totalEquity) },
+            { key: "debt", header: "Debt", align: "right", numeric: true, value: (r) => Number(r.debt), render: (r) => money(r.debt) },
+            { key: "cash", header: "Cash", align: "right", numeric: true, value: (r) => Number(r.cash), render: (r) => money(r.cash) },
+            { key: "currentRatio", header: "Current Ratio", align: "right", numeric: true, value: (r) => Number(r.currentRatio), render: (r) => fmtNum(r.currentRatio, 2) },
+            { key: "netDebtToEbitda", header: "Net Debt / EBITDA", align: "right", numeric: true, value: (r) => Number(r.netDebtToEbitda), render: (r) => fmtNum(r.netDebtToEbitda, 1) },
+          ]
+        : [
+            { key: "ticker", header: "Ticker", value: (r) => r.ticker, render: (r) => <span className="num font-medium">{r.ticker}</span> },
+            { key: "sector", header: "Sector", value: (r) => r.sector },
+            { key: "operatingCashFlow", header: "Operating CFO", align: "right", numeric: true, value: (r) => Number(r.operatingCashFlow), render: (r) => money(r.operatingCashFlow) },
+            { key: "investingCashFlow", header: "Investing CF", align: "right", numeric: true, value: (r) => Number(r.investingCashFlow), render: (r) => money(r.investingCashFlow) },
+            { key: "financingCashFlow", header: "Financing CF", align: "right", numeric: true, value: (r) => Number(r.financingCashFlow), render: (r) => money(r.financingCashFlow) },
+            { key: "freeCashFlow", header: "Free Cash Flow", align: "right", numeric: true, value: (r) => Number(r.freeCashFlow), render: (r) => money(r.freeCashFlow) },
+            { key: "capex", header: "Capex", align: "right", numeric: true, value: (r) => Number(r.capex), render: (r) => money(r.capex) },
+            { key: "cfoMargin", header: "CFO Margin", align: "right", numeric: true, value: (r) => Number(r.cfoMargin), render: (r) => <Pct value={r.cfoMargin} /> },
+          ];
+
+  const initialSortKey =
+    statement === "profit_loss" ? "netProfit" : statement === "balance_sheet" ? "totalAssets" : "freeCashFlow";
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h1 className="text-lg font-semibold tracking-tight">{meta.label}</h1>
+        <p className="text-xs text-muted-foreground">{meta.blurb}</p>
+      </div>
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="terminal-panel border-destructive/40 p-4 text-sm text-destructive">
+          Couldn't load fundamentals: {(error as any).message}
+        </div>
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={shareCols}
+          search={search}
+          initialSort={{ key: initialSortKey, dir: "desc" }}
+          emptyLabel="No fundamentals found for the current filters."
         />
       )}
     </section>

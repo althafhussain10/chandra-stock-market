@@ -7,6 +7,7 @@ export const SCREENERS = [
   "todays_breakout",
   "high_volume",
   "sector_strength",
+  "support_touched_turn_bullish",
 ] as const;
 export type ScreenerName = (typeof SCREENERS)[number];
 
@@ -288,6 +289,47 @@ async function sectorStrength(db: SupabaseClient<any>, params: any) {
   return writeResults(db, "sector_strength", matches);
 }
 
+/** 6. Support touched and turning bullish: close near 20-day support, with reversal above support and momentum. */
+async function supportTouchedTurnBullish(db: SupabaseClient<any>, params: any) {
+  const lookback = Number(params?.lookback_days ?? 20);
+  const supportBuffer = Number(params?.support_buffer_pct ?? 1.5);
+  const minBullish = Number(params?.min_turn_bullish_pct ?? 0.5);
+  const byTicker = await loadDaily(db, Math.max(lookback + 30, 90));
+  const matches: any[] = [];
+
+  for (const [ticker, rows] of byTicker) {
+    if (rows.length < lookback + 10) continue;
+    const prev = rows.slice(-lookback);
+    const supportLine = Math.min(...prev.map((r) => r.low));
+    const current = rows[rows.length - 1];
+    const prevDay = rows[rows.length - 2];
+    if (!current || !prevDay) continue;
+
+    const nearSupport = current.low <= supportLine * (1 + supportBuffer / 100);
+    const bullishReversal = current.close > prevDay.close && current.close > supportLine * (1 + minBullish / 100);
+    const shortTrend = current.close > prev[0].close;
+    const avgTrend =
+      prev.slice(-5).reduce((sum, r) => sum + r.close, 0) / 5 >
+      prev.slice(-10, -5).reduce((sum, r) => sum + r.close, 0) / 5;
+
+    if (nearSupport && bullishReversal && shortTrend && avgTrend) {
+      matches.push({
+        ticker,
+        trigger_date: current.date,
+        details: {
+          support_line: supportLine,
+          close: current.close,
+          volume: current.volume,
+          bullish_pct: pct(current.close, supportLine),
+          lookback_days: lookback,
+        },
+      });
+    }
+  }
+
+  return writeResults(db, "support_touched_turn_bullish", matches);
+}
+
 export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, params: any = {}) {
   switch (name) {
     case "ath_breakout":
@@ -300,6 +342,8 @@ export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, p
       return highVolume(db, params);
     case "sector_strength":
       return sectorStrength(db, params);
+    case "support_touched_turn_bullish":
+      return supportTouchedTurnBullish(db, params);
   }
 }
 

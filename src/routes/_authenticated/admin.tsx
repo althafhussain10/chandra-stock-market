@@ -384,6 +384,11 @@ function ScreenerSection() {
       { key: "weekly_months", label: "Weekly window (months)" },
       { key: "monthly_months", label: "Monthly window (months)" },
     ],
+    support_touched_turn_bullish: [
+      { key: "lookback_days", label: "Support lookback (days)" },
+      { key: "support_buffer_pct", label: "Support buffer (%)" },
+      { key: "min_turn_bullish_pct", label: "Bullish bounce (%)" },
+    ],
   };
 
   return (
