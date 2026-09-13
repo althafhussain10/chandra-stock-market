@@ -704,6 +704,19 @@ function ScreenerPanel({
       { key: "age", header: "Sessions Ago", align: "right", numeric: true, value: (r) => Number(r.details?.sessions_ago) },
       dateCol,
     ];
+  } else if (screener === "bullish_liquidity_reversal" || screener === "bearish_liquidity_reversal") {
+    const bullish = screener === "bullish_liquidity_reversal";
+    columns = [
+      chartCol,
+      starCol,
+      tickerCol,
+      { key: "level", header: bullish ? "Support" : "Resistance", align: "right", numeric: true, value: (r) => Number(r.details?.level), render: (r) => fmtNum(r.details?.level) },
+      { key: "sweep", header: "Sweep Date", value: (r) => r.details?.sweep_date ?? "" },
+      { key: "move", header: "Reversal", align: "right", numeric: true, value: (r) => Number(r.details?.reversal_pct), render: (r) => <Pct value={r.details?.reversal_pct} /> },
+      { key: "age", header: "Sessions Ago", align: "right", numeric: true, value: (r) => Number(r.details?.sessions_ago) },
+      dateCol,
+      sinceCol,
+    ];
   } else {
     columns = [
       { key: "rank", header: "#", align: "right", numeric: true, value: (r) => Number(r.details?.rank) },

@@ -9,6 +9,8 @@ export const SCREENERS = [
   "sector_strength",
   "support_touched_turn_bullish",
   "downtrend_turn_bullish",
+  "bullish_liquidity_reversal",
+  "bearish_liquidity_reversal",
 ] as const;
 export type ScreenerName = (typeof SCREENERS)[number];
 
@@ -402,6 +404,70 @@ async function downtrendTurnBullish(db: SupabaseClient<any>, params: any) {
   return writeResults(db, "downtrend_turn_bullish", matches);
 }
 
+/** Detects observable support/resistance liquidity sweeps with two-session confirmation. */
+async function liquidityReversal(db: SupabaseClient<any>, direction: "bullish" | "bearish", params: any) {
+  const lookback = Math.max(10, Number(params?.level_lookback_days ?? 20));
+  const bufferPct = Math.max(0.1, Number(params?.level_buffer_pct ?? 0.5));
+  const byTicker = await loadDaily(db, Math.max(lookback + 20, 60));
+  const matches: any[] = [];
+
+  for (const [ticker, rows] of byTicker) {
+    if (rows.length < lookback + 3) continue;
+    let match: any = null;
+    for (let index = rows.length - 2; index < rows.length; index++) {
+      const sweep = rows[index]!;
+      const confirmation = rows[index + 1];
+      const history = rows.slice(index - lookback, index);
+      if (!confirmation || history.length < lookback) continue;
+
+      if (direction === "bullish") {
+        const support = Math.min(...history.map((row) => row.low));
+        const swept = sweep.low < support * (1 - bufferPct / 100) && sweep.close > support;
+        const confirmed = confirmation.close > confirmation.open && confirmation.close > sweep.high;
+        if (swept && confirmed) {
+          match = {
+            ticker,
+            trigger_date: confirmation.date,
+            details: {
+              trigger_close: confirmation.close,
+              sweep_date: sweep.date,
+              level: support,
+              sweep_low: sweep.low,
+              confirmation_high: confirmation.high,
+              reversal_pct: pct(confirmation.close, support),
+              pattern: "bullish liquidity sweep",
+              sessions_ago: rows.length - 1 - (index + 1),
+            },
+          };
+        }
+      } else {
+        const resistance = Math.max(...history.map((row) => row.high));
+        const swept = sweep.high > resistance * (1 + bufferPct / 100) && sweep.close < resistance;
+        const confirmed = confirmation.close < confirmation.open && confirmation.close < sweep.low;
+        if (swept && confirmed) {
+          match = {
+            ticker,
+            trigger_date: confirmation.date,
+            details: {
+              trigger_close: confirmation.close,
+              sweep_date: sweep.date,
+              level: resistance,
+              sweep_high: sweep.high,
+              confirmation_low: confirmation.low,
+              reversal_pct: pct(confirmation.close, resistance),
+              pattern: "bearish liquidity sweep",
+              sessions_ago: rows.length - 1 - (index + 1),
+            },
+          };
+        }
+      }
+    }
+    if (match) matches.push(match);
+  }
+
+  return writeResults(db, `${direction}_liquidity_reversal`, matches);
+}
+
 export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, params: any = {}) {
   switch (name) {
     case "ath_breakout":
@@ -418,6 +484,10 @@ export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, p
       return supportTouchedTurnBullish(db, params);
     case "downtrend_turn_bullish":
       return downtrendTurnBullish(db, params);
+    case "bullish_liquidity_reversal":
+      return liquidityReversal(db, "bullish", params);
+    case "bearish_liquidity_reversal":
+      return liquidityReversal(db, "bearish", params);
   }
 }
 

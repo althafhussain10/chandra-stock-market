@@ -5,7 +5,9 @@ export type ScreenerKey =
   | "high_volume"
   | "sector_strength"
   | "support_touched_turn_bullish"
-  | "downtrend_turn_bullish";
+  | "downtrend_turn_bullish"
+  | "bullish_liquidity_reversal"
+  | "bearish_liquidity_reversal";
 
 export const SCREENER_TABS: { key: ScreenerKey; label: string; short: string; blurb: string }[] = [
   {
@@ -50,6 +52,18 @@ export const SCREENER_TABS: { key: ScreenerKey; label: string; short: string; bl
     label: "Downtrend Turned Bullish (2D)",
     short: "Turn Bullish",
     blurb: "Stocks that were trending down and turned bullish within the latest two trading sessions.",
+  },
+  {
+    key: "bullish_liquidity_reversal",
+    label: "Bullish Liquidity Sweep / Reversal",
+    short: "Bull Sweep",
+    blurb: "Support sweep below a demand zone followed by a close back above support and confirmation.",
+  },
+  {
+    key: "bearish_liquidity_reversal",
+    label: "Bearish Liquidity Sweep / Reversal",
+    short: "Bear Sweep",
+    blurb: "Resistance sweep above a supply zone followed by a close back below resistance and confirmation.",
   },
 ];
 

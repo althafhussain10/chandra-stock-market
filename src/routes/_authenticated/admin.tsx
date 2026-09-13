@@ -440,6 +440,14 @@ function ScreenerSection() {
       { key: "trend_lookback_days", label: "Downtrend lookback (days)" },
       { key: "min_downtrend_pct", label: "Minimum downtrend (%)" },
     ],
+    bullish_liquidity_reversal: [
+      { key: "level_lookback_days", label: "Support lookback (days)" },
+      { key: "level_buffer_pct", label: "Sweep buffer (%)" },
+    ],
+    bearish_liquidity_reversal: [
+      { key: "level_lookback_days", label: "Resistance lookback (days)" },
+      { key: "level_buffer_pct", label: "Sweep buffer (%)" },
+    ],
   };
 
   return (
