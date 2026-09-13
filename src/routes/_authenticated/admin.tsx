@@ -39,6 +39,30 @@ const SECTIONS = [
   { key: "watchlist", label: "Watchlist Oversight", icon: Star },
 ] as const;
 
+function parseCsvLine(line: string) {
+  const cells: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (quoted && line[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
 function AdminPage() {
   const [section, setSection] = useState<(typeof SECTIONS)[number]["key"]>("universe");
   const navigate = useNavigate();
@@ -151,10 +175,21 @@ function UniverseSection() {
   async function uploadCsv(mode: "append" | "replace") {
     const lines = csv.trim().split(/\r?\n/).filter(Boolean);
     if (lines.length === 0) return void toast.error("Paste CSV rows first");
+    const header = parseCsvLine(lines[0] ?? []).map((cell) => cell.toLowerCase());
+    const symbolIndex = Math.max(0, header.findIndex((cell) => cell === "symbol" || cell === "ticker"));
+    const nameIndex = Math.max(0, header.findIndex((cell) => cell === "company name" || cell === "name"));
+    const exchangeIndex = header.findIndex((cell) => cell === "exchange");
+    const sectorIndex = header.findIndex((cell) => cell === "sector");
+    const industryIndex = header.findIndex((cell) => cell === "industry" || cell === "subsector");
     const rows = lines
-      .filter((l) => !/^ticker\s*,/i.test(l))
+      .slice(1)
       .map((l) => {
-        const [ticker, name, sector, subsector, exchange] = l.split(",").map((x) => x?.trim() ?? "");
+        const cells = parseCsvLine(l);
+        const ticker = cells[symbolIndex] ?? "";
+        const name = cells[nameIndex] ?? "";
+        const sector = cells[sectorIndex] ?? "";
+        const subsector = cells[industryIndex] ?? "";
+        const exchange = cells[exchangeIndex] ?? "NSE";
         return {
           ticker: (ticker ?? "").toUpperCase(),
           name: name || ticker || "",
@@ -245,7 +280,19 @@ function UniverseSection() {
       </form>
 
       <div className="terminal-panel space-y-3 p-4">
-        <Label className="text-xs">Bulk CSV (ticker,name,sector,subsector,exchange)</Label>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Label className="text-xs">Bulk CSV (supports Symbol, Company Name, Exchange, Sector, Industry)</Label>
+          <Input
+            type="file"
+            accept=".csv,text/csv"
+            className="h-8 max-w-xs text-xs"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (file) setCsv(await file.text());
+              event.currentTarget.value = "";
+            }}
+          />
+        </div>
         <textarea
           value={csv}
           onChange={(e) => setCsv(e.target.value)}
@@ -388,6 +435,10 @@ function ScreenerSection() {
       { key: "lookback_days", label: "Support lookback (days)" },
       { key: "support_buffer_pct", label: "Support buffer (%)" },
       { key: "min_turn_bullish_pct", label: "Bullish bounce (%)" },
+    ],
+    downtrend_turn_bullish: [
+      { key: "trend_lookback_days", label: "Downtrend lookback (days)" },
+      { key: "min_downtrend_pct", label: "Minimum downtrend (%)" },
     ],
   };
 

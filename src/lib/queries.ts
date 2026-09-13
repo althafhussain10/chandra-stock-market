@@ -95,22 +95,30 @@ export function useLatestPrices() {
   });
 }
 
-export function useDailyCandles(ticker: string | null) {
+export type ChartTimeframe = "daily" | "weekly" | "monthly";
+
+export function useChartCandles(ticker: string | null, timeframe: ChartTimeframe) {
   return useQuery({
-    queryKey: ["daily_candles", ticker],
+    queryKey: ["chart_candles", ticker, timeframe],
     enabled: Boolean(ticker),
     queryFn: async () => {
+      const table = timeframe === "daily" ? "daily_candles" : timeframe === "weekly" ? "weekly_candles" : "monthly_candles";
+      const dateColumn = timeframe === "daily" ? "date" : timeframe === "weekly" ? "week_end_date" : "month_end_date";
       const { data, error } = await supabase
-        .from("daily_candles")
-        .select("date,open,high,low,close,volume")
+        .from(table)
+        .select(`${dateColumn},open,high,low,close,volume`)
         .eq("ticker", ticker!)
-        .order("date", { ascending: false })
-        .limit(180);
+        .order(dateColumn, { ascending: false })
+        .limit(timeframe === "daily" ? 180 : timeframe === "weekly" ? 104 : 60);
       if (error) throw error;
-      return [...(data ?? [])].reverse();
+      return [...(data ?? [])]
+        .reverse()
+        .map((row: any) => ({ ...row, date: row[dateColumn] }));
     },
   });
 }
+
+export const useDailyCandles = (ticker: string | null) => useChartCandles(ticker, "daily");
 
 export function useWatchlist() {
   return useQuery({

@@ -8,6 +8,7 @@ export const SCREENERS = [
   "high_volume",
   "sector_strength",
   "support_touched_turn_bullish",
+  "downtrend_turn_bullish",
 ] as const;
 export type ScreenerName = (typeof SCREENERS)[number];
 
@@ -343,6 +344,64 @@ async function supportTouchedTurnBullish(db: SupabaseClient<any>, params: any) {
   return writeResults(db, "support_touched_turn_bullish", matches);
 }
 
+/** Finds a short downtrend that reverses bullish within the latest two sessions. */
+async function downtrendTurnBullish(db: SupabaseClient<any>, params: any) {
+  const lookback = Math.max(10, Number(params?.trend_lookback_days ?? 20));
+  const minDowntrendPct = Math.max(0, Number(params?.min_downtrend_pct ?? 2));
+  const byTicker = await loadDaily(db, Math.max(lookback + 30, 90));
+  const matches: any[] = [];
+
+  for (const [ticker, rows] of byTicker) {
+    if (rows.length < lookback + 5) continue;
+    const last = rows.length - 1;
+    let signal: Row | null = null;
+    let signalIndex = -1;
+
+    for (let index = Math.max(lookback, rows.length - 2); index <= last; index++) {
+      const current = rows[index]!;
+      const previous = rows[index - 1]!;
+      const trendStart = rows[index - lookback]!;
+      const priorWindow = rows.slice(index - 5, index);
+      if (!trendStart || !previous || priorWindow.length < 5) continue;
+
+      const sma5 = priorWindow.reduce((sum, row) => sum + row.close, 0) / priorWindow.length;
+      const mediumWindow = rows.slice(index - lookback, index);
+      const sma20 = mediumWindow.reduce((sum, row) => sum + row.close, 0) / mediumWindow.length;
+      const downtrendPct = pct(previous.close, trendStart.close);
+      const fallingShortTrend = priorWindow[4]!.close < priorWindow[0]!.close;
+      const bullishCandle = current.close > current.open && current.close > previous.close;
+      const turnsAboveShortTrend = current.close > sma5;
+      const remainsBelowMediumTrend = previous.close < sma20;
+
+      if (downtrendPct <= -minDowntrendPct && fallingShortTrend && remainsBelowMediumTrend && bullishCandle && turnsAboveShortTrend) {
+        signal = current;
+        signalIndex = index;
+      }
+    }
+
+    if (!signal || signalIndex < 0) continue;
+    const prior = rows[signalIndex - 1]!;
+    const trendStart = rows[signalIndex - lookback]!;
+    const support = Math.min(...rows.slice(signalIndex - Math.min(lookback, 20), signalIndex + 1).map((row) => row.low));
+    matches.push({
+      ticker,
+      trigger_date: signal.date,
+      details: {
+        trigger_close: signal.close,
+        previous_close: prior.close,
+        trend_start_close: trendStart.close,
+        downtrend_pct: pct(prior.close, trendStart.close),
+        bullish_turn_pct: pct(signal.close, prior.close),
+        support,
+        trend_lookback_days: lookback,
+        sessions_ago: rows.length - 1 - signalIndex,
+      },
+    });
+  }
+
+  return writeResults(db, "downtrend_turn_bullish", matches);
+}
+
 export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, params: any = {}) {
   switch (name) {
     case "ath_breakout":
@@ -357,6 +416,8 @@ export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, p
       return sectorStrength(db, params);
     case "support_touched_turn_bullish":
       return supportTouchedTurnBullish(db, params);
+    case "downtrend_turn_bullish":
+      return downtrendTurnBullish(db, params);
   }
 }
 

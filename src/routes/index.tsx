@@ -3,7 +3,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Search, Star, ShieldAlert, Menu, TrendingUp, TrendingDown, LineChart as LineChartIcon } from "lucide-react";
 import { toast } from "sonner";
-import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +22,8 @@ import {
 } from "@/lib/screener-meta";
 import {
   useFundamentals,
-  useDailyCandles,
+  useChartCandles,
+  type ChartTimeframe,
   useLatestPrices,
   useResultCounts,
   useResults,
@@ -446,22 +446,53 @@ function findLevel(points: CandlePoint[], kind: "support" | "resistance") {
   if (points.length < 7) return null;
   const candidates: number[] = [];
   for (let i = 2; i < points.length - 2; i++) {
-    const value = kind === "support" ? points[i].low : points[i].high;
+    const point = points[i]!;
+    if (!point) continue;
+    const value = kind === "support" ? point.low : point.high;
     const neighbors = points.slice(i - 2, i + 3).map((p) => (kind === "support" ? p.low : p.high));
     const isPivot = kind === "support" ? value === Math.min(...neighbors) : value === Math.max(...neighbors);
     if (isPivot) candidates.push(value);
   }
-  const latest = points[points.length - 1].close;
+  const lastPoint = points.at(-1);
+  if (!lastPoint) return null;
+  const latest = lastPoint.close;
   const eligible = candidates.filter((level) => (kind === "support" ? level < latest : level > latest));
   if (!eligible.length) return null;
   return kind === "support" ? Math.max(...eligible) : Math.min(...eligible);
 }
 
+function findBreakoutRetest(points: CandlePoint[], resistance: number | null) {
+  if (resistance == null) return null;
+  const resistanceIndex = points.findIndex((point) => point.high >= resistance);
+  if (resistanceIndex < 0) return null;
+  const breakoutIndex = points.findIndex(
+    (point, index) => index > resistanceIndex && point.close > resistance,
+  );
+  if (breakoutIndex < 0) return null;
+  const retestIndex = points.findIndex(
+    (point, index) => index > breakoutIndex && point.low <= resistance * 1.01 && point.close >= resistance,
+  );
+  return { resistanceIndex, breakoutIndex, retestIndex };
+}
+
 function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }) {
-  const { data, isLoading, error } = useDailyCandles(ticker);
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const { data, isLoading, error } = useChartCandles(ticker, timeframe);
   const points = (data ?? []) as CandlePoint[];
   const support = findLevel(points, "support");
   const resistance = findLevel(points, "resistance");
+  const pattern = findBreakoutRetest(points, resistance);
+  const width = 980;
+  const height = 420;
+  const pad = { top: 24, right: 72, bottom: 34, left: 56 };
+  const chartWidth = width - pad.left - pad.right;
+  const chartHeight = height - pad.top - pad.bottom;
+  const min = points.length ? Math.min(...points.map((point) => point.low), support ?? Infinity) : 0;
+  const max = points.length ? Math.max(...points.map((point) => point.high), resistance ?? -Infinity) : 1;
+  const y = (value: number) => pad.top + ((max - value) / Math.max(max - min, 1)) * chartHeight;
+  const x = (index: number) => pad.left + (index / Math.max(points.length - 1, 1)) * chartWidth;
+  const candleWidth = Math.max(3, Math.min(12, chartWidth / Math.max(points.length, 1) * 0.62));
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -469,9 +500,24 @@ function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span className="num">{ticker.replace(".NS", "")}</span>
-            <span className="text-sm font-normal text-muted-foreground">Daily price levels</span>
+            <span className="text-sm font-normal text-muted-foreground">Candlestick trend map</span>
           </DialogTitle>
         </DialogHeader>
+        <div className="flex gap-1 rounded-md border border-border bg-surface-raised p-1">
+          {(["daily", "weekly", "monthly"] as const).map((period) => (
+            <button
+              key={period}
+              type="button"
+              onClick={() => setTimeframe(period)}
+              className={cn(
+                "rounded px-3 py-1.5 text-xs capitalize",
+                timeframe === period ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {period}
+            </button>
+          ))}
+        </div>
         {isLoading ? (
           <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">Loading candles...</div>
         ) : error ? (
@@ -483,18 +529,30 @@ function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }
             <div className="flex flex-wrap gap-4 text-xs">
               <span className="flex items-center gap-2 text-up"><i className="h-0.5 w-5 bg-up" /> Support {support == null ? "—" : fmtNum(support)}</span>
               <span className="flex items-center gap-2 text-down"><i className="h-0.5 w-5 bg-down" /> Resistance {resistance == null ? "—" : fmtNum(resistance)}</span>
+              {pattern?.retestIndex != null && <span className="text-primary">Breakout retest detected</span>}
             </div>
-            <div className="h-80 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={points} margin={{ top: 12, right: 18, left: 4, bottom: 4 }}>
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(value) => String(value).slice(5)} minTickGap={36} />
-                  <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={58} tickFormatter={(value) => fmtNum(value, 0)} />
-                  <Tooltip labelFormatter={(value) => String(value)} formatter={(value: number) => [fmtNum(value), "Close"]} />
-                  <Line type="monotone" dataKey="close" stroke="var(--color-chart-2)" strokeWidth={2} dot={false} />
-                  {support != null && <ReferenceLine y={support} stroke="var(--color-up)" strokeDasharray="6 4" label={{ value: "SUPPORT", fill: "var(--color-up)", fontSize: 10 }} />}
-                  {resistance != null && <ReferenceLine y={resistance} stroke="var(--color-down)" strokeDasharray="6 4" label={{ value: "RESISTANCE", fill: "var(--color-down)", fontSize: 10 }} />}
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="relative">
+            <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-h-80 w-full rounded-md border border-border bg-background" role="img" aria-label={`${ticker} ${timeframe} candlestick chart`} onMouseLeave={() => setHoveredIndex(null)}>
+              {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+                const value = max - (max - min) * fraction;
+                return <g key={fraction}><line x1={pad.left} x2={width - pad.right} y1={y(value)} y2={y(value)} stroke="var(--color-border)" strokeDasharray="3 5" /><text x={width - pad.right + 8} y={y(value) + 4} fill="var(--color-muted-foreground)" fontSize="10">{fmtNum(value, 0)}</text></g>;
+              })}
+              {points.map((point, index) => {
+                const rising = point.close >= point.open;
+                const candleX = x(index);
+                const bodyTop = y(Math.max(point.open, point.close));
+                const bodyHeight = Math.max(1.5, Math.abs(y(point.open) - y(point.close)));
+                return <g key={point.date}><line x1={candleX} x2={candleX} y1={y(point.high)} y2={y(point.low)} stroke={rising ? "var(--color-up)" : "var(--color-down)"} strokeWidth="1.2" /><rect x={candleX - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={rising ? "var(--color-up)" : "var(--color-down)"} opacity="0.92" /><rect x={candleX - Math.max(candleWidth / 2, 5)} y={pad.top} width={Math.max(candleWidth, 10)} height={chartHeight} fill="transparent" onMouseEnter={() => setHoveredIndex(index)} /></g>;
+              })}
+              {support != null && <line x1={pad.left} x2={width - pad.right} y1={y(support)} y2={y(support)} stroke="var(--color-up)" strokeDasharray="7 4" strokeWidth="1.5" />}
+              {resistance != null && <line x1={pad.left} x2={width - pad.right} y1={y(resistance)} y2={y(resistance)} stroke="var(--color-down)" strokeDasharray="7 4" strokeWidth="1.5" />}
+              {pattern?.retestIndex != null && resistance != null && <><line x1={x(pattern.resistanceIndex)} x2={x(pattern.retestIndex)} y1={y(resistance)} y2={y(resistance)} stroke="var(--color-primary)" strokeWidth="2" /><text x={x(pattern.breakoutIndex)} y={y(resistance) - 10} fill="var(--color-primary)" fontSize="11" textAnchor="middle">BREAKOUT</text><text x={x(pattern.retestIndex)} y={y(resistance) + 18} fill="var(--color-primary)" fontSize="11" textAnchor="middle">RETEST AS SUPPORT</text></>}
+              {points.filter((_, index) => index === 0 || index === points.length - 1 || index % Math.max(1, Math.floor(points.length / 6)) === 0).map((point) => <text key={`label-${point.date}`} x={x(points.indexOf(point))} y={height - 10} fill="var(--color-muted-foreground)" fontSize="10" textAnchor="middle">{point.date.slice(0, 7)}</text>)}
+            </svg>
+            {hoveredIndex != null && points[hoveredIndex] && <div className="pointer-events-none absolute z-10 min-w-36 -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg" style={{ left: `${(x(hoveredIndex) / width) * 100}%`, top: `${Math.max(2, (y(points[hoveredIndex].high) / height) * 100)}%` }}>
+              <div className="mb-1 font-medium">{points[hoveredIndex].date}</div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 num text-[11px]"><span>Open</span><span className="text-right">{fmtNum(points[hoveredIndex].open)}</span><span>High</span><span className="text-right">{fmtNum(points[hoveredIndex].high)}</span><span>Low</span><span className="text-right">{fmtNum(points[hoveredIndex].low)}</span><span>Close</span><span className="text-right">{fmtNum(points[hoveredIndex].close)}</span><span>Volume</span><span className="text-right">{fmtInt(points[hoveredIndex].volume)}</span></div>
+            </div>}
             </div>
           </div>
         )}
@@ -634,6 +692,18 @@ function ScreenerPanel({
       { key: "close", header: "Close", align: "right", numeric: true, value: (r) => Number(r.details?.trigger_close), render: (r) => fmtNum(r.details?.trigger_close) },
       dateCol,
     ];
+  } else if (screener === "downtrend_turn_bullish") {
+    columns = [
+      chartCol,
+      starCol,
+      tickerCol,
+      { key: "close", header: "Turn Close", align: "right", numeric: true, value: (r) => Number(r.details?.trigger_close), render: (r) => fmtNum(r.details?.trigger_close) },
+      { key: "down", header: "Downtrend", align: "right", numeric: true, value: (r) => Number(r.details?.downtrend_pct), render: (r) => <Pct value={r.details?.downtrend_pct} /> },
+      { key: "turn", header: "Bullish Turn", align: "right", numeric: true, value: (r) => Number(r.details?.bullish_turn_pct), render: (r) => <Pct value={r.details?.bullish_turn_pct} /> },
+      { key: "support", header: "Support", align: "right", numeric: true, value: (r) => Number(r.details?.support), render: (r) => fmtNum(r.details?.support) },
+      { key: "age", header: "Sessions Ago", align: "right", numeric: true, value: (r) => Number(r.details?.sessions_ago) },
+      dateCol,
+    ];
   } else {
     columns = [
       { key: "rank", header: "#", align: "right", numeric: true, value: (r) => Number(r.details?.rank) },
@@ -700,9 +770,9 @@ function FundamentalPanel({
 }) {
   const meta = FUNDAMENTAL_TABS.find((t) => t.key === statement)!;
   const { data, isLoading, error } = useFundamentals(statement);
-  const fallbackRows = FUNDAMENTAL_DATA[statement] as Array<Record<string, any>>;
-  const sourceRows = data && data.length > 0 ? data : fallbackRows;
-  const rows = sourceRows.map((row) => ({
+  const fallbackRows = FUNDAMENTAL_DATA[statement] as unknown as Array<Record<string, any>>;
+  const sourceRows: Array<any> = data && data.length > 0 ? (data as Array<any>) : fallbackRows;
+  const rows = (sourceRows as Array<any>).map((row) => ({
     ...(row.metrics ?? row),
     ticker: row.ticker,
     sector: nameOf[row.ticker]?.sector ?? row.sector ?? "",

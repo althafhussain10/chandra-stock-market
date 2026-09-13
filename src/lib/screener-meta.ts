@@ -4,7 +4,8 @@ export type ScreenerKey =
   | "todays_breakout"
   | "high_volume"
   | "sector_strength"
-  | "support_touched_turn_bullish";
+  | "support_touched_turn_bullish"
+  | "downtrend_turn_bullish";
 
 export const SCREENER_TABS: { key: ScreenerKey; label: string; short: string; blurb: string }[] = [
   {
@@ -43,6 +44,12 @@ export const SCREENER_TABS: { key: ScreenerKey; label: string; short: string; bl
     label: "Support Touched / Turn Bullish",
     short: "Support",
     blurb: "Stocks that bounce off a near-term support zone and turn bullish on a clean reversal.",
+  },
+  {
+    key: "downtrend_turn_bullish",
+    label: "Downtrend Turned Bullish (2D)",
+    short: "Turn Bullish",
+    blurb: "Stocks that were trending down and turned bullish within the latest two trading sessions.",
   },
 ];
 
