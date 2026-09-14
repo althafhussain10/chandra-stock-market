@@ -7,7 +7,9 @@ export type ScreenerKey =
   | "support_touched_turn_bullish"
   | "downtrend_turn_bullish"
   | "bullish_liquidity_reversal"
-  | "bearish_liquidity_reversal";
+  | "bearish_liquidity_reversal"
+  | "ema_trend_bullish"
+  | "three_candle_bullish_turn";
 
 export const SCREENER_TABS: { key: ScreenerKey; label: string; short: string; blurb: string }[] = [
   {
@@ -64,6 +66,18 @@ export const SCREENER_TABS: { key: ScreenerKey; label: string; short: string; bl
     label: "Bearish Liquidity Sweep / Reversal",
     short: "Bear Sweep",
     blurb: "Resistance sweep above a supply zone followed by a close back below resistance and confirmation.",
+  },
+  {
+    key: "ema_trend_bullish",
+    label: "Bullish EMA Trend (50 > 100 > 200)",
+    short: "EMA Trend",
+    blurb: "Present close is above EMA50, with EMA50 above EMA100 and EMA100 above EMA200.",
+  },
+  {
+    key: "three_candle_bullish_turn",
+    label: "Three-Candle Bullish Turn",
+    short: "3-Candle Turn",
+    blurb: "Two consecutive breakdown closes are followed by a present candle closing above the last candle high.",
   },
 ];
 

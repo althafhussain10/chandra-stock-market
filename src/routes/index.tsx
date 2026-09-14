@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Search, Star, ShieldAlert, Menu, TrendingUp, TrendingDown, LineChart as LineChartIcon } from "lucide-react";
+import { Search, Star, ShieldAlert, Menu, TrendingUp, TrendingDown, LineChart as LineChartIcon, LogIn, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
 import {
   useFundamentals,
   useChartCandles,
+  useSectorChartCandles,
   type ChartTimeframe,
   useLatestPrices,
   useResultCounts,
@@ -238,6 +239,8 @@ function Dashboard() {
   const [tab, setTab] = useState<TabKey>("ath_breakout");
   const [search, setSearch] = useState("");
   const [navOpen, setNavOpen] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const navigate = useNavigate();
 
   const settings = useSettings();
   const counts = useResultCounts();
@@ -245,6 +248,20 @@ function Dashboard() {
   const watchlist = useWatchlist();
   const prices = useLatestPrices();
   const qc = useQueryClient();
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) setSignedIn(Boolean(data.session));
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSignedIn(Boolean(session));
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   const starred = new Set((watchlist.data ?? []).map((w) => w.ticker));
   const nameOf = useMemo(
@@ -269,6 +286,15 @@ function Dashboard() {
       toast.success(`${ticker} added to watchlist`);
     }
     qc.invalidateQueries({ queryKey: ["watchlist"] });
+  }
+
+  async function handleAuth() {
+    if (signedIn) {
+      await supabase.auth.signOut();
+      toast.success("Signed out");
+      return;
+    }
+    navigate({ to: "/auth", search: { denied: false } });
   }
 
   const lastRefresh = ((settings.data as any)?.['last_refresh'])?.at as string | null | undefined;
@@ -397,6 +423,10 @@ function Dashboard() {
               />
             </div>
             <RefreshButton compact />
+            <Button type="button" variant="outline" size="sm" onClick={handleAuth} className="gap-2">
+              {signedIn ? <LogOut className="size-4" /> : <LogIn className="size-4" />}
+              <span className="hidden sm:inline">{signedIn ? "Logout" : "Login"}</span>
+            </Button>
           </div>
         </header>
 
@@ -442,6 +472,21 @@ function Pct({ value }: { value: number | null | undefined }) {
 
 type CandlePoint = { date: string; open: number; high: number; low: number; close: number; volume: number };
 
+class ChartErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <div className="flex h-80 items-center justify-center text-sm text-destructive">Chart data could not be displayed for this selection.</div>;
+    }
+    return this.props.children;
+  }
+}
+
 function findLevel(points: CandlePoint[], kind: "support" | "resistance") {
   if (points.length < 7) return null;
   const candidates: number[] = [];
@@ -475,13 +520,37 @@ function findBreakoutRetest(points: CandlePoint[], resistance: number | null) {
   return { resistanceIndex, breakoutIndex, retestIndex };
 }
 
-function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }) {
+type TrendLine = { firstIndex: number; firstValue: number; lastIndex: number; lastValue: number };
+
+function findAutoTrendLine(points: CandlePoint[], kind: "support" | "resistance"): TrendLine | null {
+  const pivots: { index: number; value: number }[] = [];
+  for (let index = 2; index < points.length - 2; index++) {
+    const value = kind === "support" ? points[index]!.low : points[index]!.high;
+    const neighbors = points.slice(index - 2, index + 3).map((point) => kind === "support" ? point.low : point.high);
+    const isPivot = kind === "support" ? value === Math.min(...neighbors) : value === Math.max(...neighbors);
+    if (isPivot) pivots.push({ index, value });
+  }
+  if (pivots.length < 2) return null;
+  const last = pivots.at(-1)!;
+  const previous = pivots.at(-2)!;
+  return { firstIndex: previous.index, firstValue: previous.value, lastIndex: last.index, lastValue: last.value };
+}
+
+function StockChart({ ticker, sector, label, onClose }: { ticker: string | null; sector: string | null; label: string; onClose: () => void }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [showSupport, setShowSupport] = useState(true);
+  const [showResistance, setShowResistance] = useState(true);
+  const [showTrendlines, setShowTrendlines] = useState(true);
   const { data, isLoading, error } = useChartCandles(ticker, timeframe);
-  const points = (data ?? []) as CandlePoint[];
+  const sectorChart = useSectorChartCandles(sector, timeframe);
+  const points = (ticker ? data ?? [] : sectorChart.data ?? []) as CandlePoint[];
+  const chartLoading = ticker ? isLoading : sectorChart.isLoading;
+  const chartError = ticker ? error : sectorChart.error;
   const support = findLevel(points, "support");
   const resistance = findLevel(points, "resistance");
+  const supportTrend = findAutoTrendLine(points, "support");
+  const resistanceTrend = findAutoTrendLine(points, "resistance");
   const pattern = findBreakoutRetest(points, resistance);
   const width = 980;
   const height = 420;
@@ -493,13 +562,17 @@ function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }
   const y = (value: number) => pad.top + ((max - value) / Math.max(max - min, 1)) * chartHeight;
   const x = (index: number) => pad.left + (index / Math.max(points.length - 1, 1)) * chartWidth;
   const candleWidth = Math.max(3, Math.min(12, chartWidth / Math.max(points.length, 1) * 0.62));
+  const projectTrend = (line: TrendLine) => {
+    const slope = (line.lastValue - line.firstValue) / Math.max(line.lastIndex - line.firstIndex, 1);
+    return line.lastValue + slope * (points.length - 1 - line.lastIndex);
+  };
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <span className="num">{ticker.replace(".NS", "")}</span>
+            <span className="num">{label}</span>
             <span className="text-sm font-normal text-muted-foreground">Candlestick trend map</span>
           </DialogTitle>
         </DialogHeader>
@@ -518,9 +591,14 @@ function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }
             </button>
           ))}
         </div>
-        {isLoading ? (
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <label className="flex cursor-pointer items-center gap-1.5 text-up"><input type="checkbox" checked={showSupport} onChange={(event) => setShowSupport(event.target.checked)} /> Support</label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-down"><input type="checkbox" checked={showResistance} onChange={(event) => setShowResistance(event.target.checked)} /> Resistance</label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-primary"><input type="checkbox" checked={showTrendlines} onChange={(event) => setShowTrendlines(event.target.checked)} /> Auto trendlines</label>
+        </div>
+        {chartLoading ? (
           <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">Loading candles...</div>
-        ) : error ? (
+        ) : chartError ? (
           <div className="flex h-80 items-center justify-center text-sm text-destructive">Could not load chart data.</div>
         ) : points.length < 7 ? (
           <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">Not enough candle data.</div>
@@ -531,8 +609,8 @@ function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }
               <span className="flex items-center gap-2 text-down"><i className="h-0.5 w-5 bg-down" /> Resistance {resistance == null ? "—" : fmtNum(resistance)}</span>
               {pattern?.retestIndex != null && <span className="text-primary">Breakout retest detected</span>}
             </div>
-            <div className="relative">
-            <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-h-80 w-full rounded-md border border-border bg-background" role="img" aria-label={`${ticker} ${timeframe} candlestick chart`} onMouseLeave={() => setHoveredIndex(null)}>
+            <div className="relative chart-fade-in">
+              <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-h-80 w-full rounded-md border border-border bg-background" role="img" aria-label={`${label} ${timeframe} candlestick chart`} onMouseLeave={() => setHoveredIndex(null)}>
               {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
                 const value = max - (max - min) * fraction;
                 return <g key={fraction}><line x1={pad.left} x2={width - pad.right} y1={y(value)} y2={y(value)} stroke="var(--color-border)" strokeDasharray="3 5" /><text x={width - pad.right + 8} y={y(value) + 4} fill="var(--color-muted-foreground)" fontSize="10">{fmtNum(value, 0)}</text></g>;
@@ -542,10 +620,12 @@ function StockChart({ ticker, onClose }: { ticker: string; onClose: () => void }
                 const candleX = x(index);
                 const bodyTop = y(Math.max(point.open, point.close));
                 const bodyHeight = Math.max(1.5, Math.abs(y(point.open) - y(point.close)));
-                return <g key={point.date}><line x1={candleX} x2={candleX} y1={y(point.high)} y2={y(point.low)} stroke={rising ? "var(--color-up)" : "var(--color-down)"} strokeWidth="1.2" /><rect x={candleX - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={rising ? "var(--color-up)" : "var(--color-down)"} opacity="0.92" /><rect x={candleX - Math.max(candleWidth / 2, 5)} y={pad.top} width={Math.max(candleWidth, 10)} height={chartHeight} fill="transparent" onMouseEnter={() => setHoveredIndex(index)} /></g>;
+                return <g key={point.date} className="chart-candle-rise" style={{ animationDelay: `${Math.min(index * 12, 420)}ms` }}><line x1={candleX} x2={candleX} y1={y(point.high)} y2={y(point.low)} stroke={rising ? "var(--color-up)" : "var(--color-down)"} strokeWidth="1.2" /><rect x={candleX - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={rising ? "var(--color-up)" : "var(--color-down)"} opacity="0.92" /><rect x={candleX - Math.max(candleWidth / 2, 5)} y={pad.top} width={Math.max(candleWidth, 10)} height={chartHeight} fill="transparent" onMouseEnter={() => setHoveredIndex(index)} /></g>;
               })}
-              {support != null && <line x1={pad.left} x2={width - pad.right} y1={y(support)} y2={y(support)} stroke="var(--color-up)" strokeDasharray="7 4" strokeWidth="1.5" />}
-              {resistance != null && <line x1={pad.left} x2={width - pad.right} y1={y(resistance)} y2={y(resistance)} stroke="var(--color-down)" strokeDasharray="7 4" strokeWidth="1.5" />}
+              {showSupport && support != null && <line className="chart-draw-line" x1={pad.left} x2={width - pad.right} y1={y(support)} y2={y(support)} stroke="var(--color-up)" strokeDasharray="7 4" strokeWidth="1.5" />}
+              {showResistance && resistance != null && <line className="chart-draw-line" x1={pad.left} x2={width - pad.right} y1={y(resistance)} y2={y(resistance)} stroke="var(--color-down)" strokeDasharray="7 4" strokeWidth="1.5" />}
+              {showTrendlines && supportTrend && <><line className="chart-draw-line" x1={x(supportTrend.firstIndex)} y1={y(supportTrend.firstValue)} x2={width - pad.right} y2={y(projectTrend(supportTrend))} stroke="var(--color-up)" strokeWidth="2" /><text x={width - pad.right - 4} y={y(projectTrend(supportTrend)) - 6} fill="var(--color-up)" fontSize="10" textAnchor="end">AUTO SUPPORT TRENDLINE</text></>}
+              {showTrendlines && resistanceTrend && <><line className="chart-draw-line" x1={x(resistanceTrend.firstIndex)} y1={y(resistanceTrend.firstValue)} x2={width - pad.right} y2={y(projectTrend(resistanceTrend))} stroke="var(--color-down)" strokeWidth="2" /><text x={width - pad.right - 4} y={y(projectTrend(resistanceTrend)) - 6} fill="var(--color-down)" fontSize="10" textAnchor="end">AUTO RESISTANCE TRENDLINE</text></>}
               {pattern?.retestIndex != null && resistance != null && <><line x1={x(pattern.resistanceIndex)} x2={x(pattern.retestIndex)} y1={y(resistance)} y2={y(resistance)} stroke="var(--color-primary)" strokeWidth="2" /><text x={x(pattern.breakoutIndex)} y={y(resistance) - 10} fill="var(--color-primary)" fontSize="11" textAnchor="middle">BREAKOUT</text><text x={x(pattern.retestIndex)} y={y(resistance) + 18} fill="var(--color-primary)" fontSize="11" textAnchor="middle">RETEST AS SUPPORT</text></>}
               {points.filter((_, index) => index === 0 || index === points.length - 1 || index % Math.max(1, Math.floor(points.length / 6)) === 0).map((point) => <text key={`label-${point.date}`} x={x(points.indexOf(point))} y={height - 10} fill="var(--color-muted-foreground)" fontSize="10" textAnchor="middle">{point.date.slice(0, 7)}</text>)}
             </svg>
@@ -581,7 +661,7 @@ function ScreenerPanel({
   const meta = SCREENER_TABS.find((t) => t.key === screener)!;
   const { data, isLoading, error } = useResults(screener);
   const rows = (data ?? []) as ResultRow[];
-  const [chartTicker, setChartTicker] = useState<string | null>(null);
+  const [chartTarget, setChartTarget] = useState<{ ticker: string | null; sector: string | null; label: string } | null>(null);
 
   const starCol: Column<ResultRow> = {
     key: "star",
@@ -602,7 +682,14 @@ function ScreenerPanel({
     header: "Chart",
     value: () => 0,
     render: (r) => (
-      <button type="button" onClick={() => setChartTicker(r.ticker)} aria-label={`Open chart for ${r.ticker}`} className="text-muted-foreground hover:text-primary">
+      <button
+        type="button"
+        onClick={() => setChartTarget(screener === "sector_strength"
+          ? { ticker: null, sector: r.details?.sector ?? null, label: `${r.details?.sector ?? "Sector"} average` }
+          : { ticker: r.ticker, sector: null, label: r.ticker.replace(".NS", "") })}
+        aria-label={`Open chart for ${r.ticker}`}
+        className="text-muted-foreground hover:text-primary"
+      >
         <LineChartIcon className="size-4" />
       </button>
     ),
@@ -717,8 +804,33 @@ function ScreenerPanel({
       dateCol,
       sinceCol,
     ];
+  } else if (screener === "ema_trend_bullish") {
+    columns = [
+      chartCol,
+      starCol,
+      tickerCol,
+      { key: "close", header: "Present Close", align: "right", numeric: true, value: (r) => Number(r.details?.trigger_close), render: (r) => fmtNum(r.details?.trigger_close) },
+      { key: "ema50", header: "EMA50", align: "right", numeric: true, value: (r) => Number(r.details?.ema50), render: (r) => fmtNum(r.details?.ema50) },
+      { key: "ema100", header: "EMA100", align: "right", numeric: true, value: (r) => Number(r.details?.ema100), render: (r) => fmtNum(r.details?.ema100) },
+      { key: "ema200", header: "EMA200", align: "right", numeric: true, value: (r) => Number(r.details?.ema200), render: (r) => fmtNum(r.details?.ema200) },
+      dateCol,
+      sinceCol,
+    ];
+  } else if (screener === "three_candle_bullish_turn") {
+    columns = [
+      chartCol,
+      starCol,
+      tickerCol,
+      { key: "close", header: "Present Close", align: "right", numeric: true, value: (r) => Number(r.details?.trigger_close), render: (r) => fmtNum(r.details?.trigger_close) },
+      { key: "lastHigh", header: "Last Candle High", align: "right", numeric: true, value: (r) => Number(r.details?.last_high), render: (r) => fmtNum(r.details?.last_high) },
+      { key: "breakout", header: "Breakout", align: "right", numeric: true, value: (r) => Number(r.details?.breakout_pct), render: (r) => <Pct value={r.details?.breakout_pct} /> },
+      { key: "lastDate", header: "Last Candle", value: (r) => r.details?.last_date ?? "" },
+      dateCol,
+      sinceCol,
+    ];
   } else {
     columns = [
+      chartCol,
       { key: "rank", header: "#", align: "right", numeric: true, value: (r) => Number(r.details?.rank) },
       { key: "sector", header: "Sector", value: (r) => r.details?.sector ?? "" },
       { key: "sub", header: "Sub-sector", value: (r) => r.details?.subsector ?? "" },
@@ -767,7 +879,7 @@ function ScreenerPanel({
           emptyLabel="No matches yet — hit Refresh Data to run the screeners."
         />
       )}
-      {chartTicker && <StockChart ticker={chartTicker} onClose={() => setChartTicker(null)} />}
+      {chartTarget && <ChartErrorBoundary><StockChart {...chartTarget} onClose={() => setChartTarget(null)} /></ChartErrorBoundary>}
     </section>
   );
 }

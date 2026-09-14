@@ -113,7 +113,52 @@ export function useChartCandles(ticker: string | null, timeframe: ChartTimeframe
       if (error) throw error;
       return [...(data ?? [])]
         .reverse()
-        .map((row: any) => ({ ...row, date: row[dateColumn] }));
+        .map((row: any) => ({
+          date: row[dateColumn],
+          open: Number(row.open),
+          high: Number(row.high),
+          low: Number(row.low),
+          close: Number(row.close),
+          volume: Number(row.volume ?? 0),
+        }))
+        .filter((row) => row.date && [row.open, row.high, row.low, row.close].every(Number.isFinite));
+    },
+  });
+}
+
+export function useSectorChartCandles(sector: string | null, timeframe: ChartTimeframe) {
+  return useQuery({
+    queryKey: ["sector_chart_candles", sector, timeframe],
+    enabled: Boolean(sector),
+    queryFn: async () => {
+      const table = timeframe === "daily" ? "daily_candles" : timeframe === "weekly" ? "weekly_candles" : "monthly_candles";
+      const dateColumn = timeframe === "daily" ? "date" : timeframe === "weekly" ? "week_end_date" : "month_end_date";
+      const { data: stocks, error: stockError } = await supabase.from("stocks").select("ticker").eq("sector", sector!);
+      if (stockError) throw stockError;
+      const tickers = (stocks ?? []).map((stock) => stock.ticker);
+      if (!tickers.length) return [];
+      const { data, error } = await supabase
+        .from(table)
+        .select(`ticker,${dateColumn},open,high,low,close,volume`)
+        .in("ticker", tickers)
+        .order(dateColumn, { ascending: true })
+        .limit(5000);
+      if (error) throw error;
+      const grouped = new Map<string, any[]>();
+      for (const row of data ?? []) {
+        const date = row[dateColumn];
+        const values = grouped.get(date) ?? [];
+        values.push(row);
+        grouped.set(date, values);
+      }
+      return [...grouped.entries()].map(([date, rows]) => ({
+        date,
+        open: rows.reduce((sum, row) => sum + Number(row.open), 0) / rows.length,
+        high: Math.max(...rows.map((row) => Number(row.high))),
+        low: Math.min(...rows.map((row) => Number(row.low))),
+        close: rows.reduce((sum, row) => sum + Number(row.close), 0) / rows.length,
+        volume: rows.reduce((sum, row) => sum + Number(row.volume ?? 0), 0),
+      })).filter((row) => row.date && [row.open, row.high, row.low, row.close].every(Number.isFinite)).slice(-(timeframe === "daily" ? 180 : timeframe === "weekly" ? 104 : 60));
     },
   });
 }

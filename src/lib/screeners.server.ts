@@ -11,6 +11,8 @@ export const SCREENERS = [
   "downtrend_turn_bullish",
   "bullish_liquidity_reversal",
   "bearish_liquidity_reversal",
+  "ema_trend_bullish",
+  "three_candle_bullish_turn",
 ] as const;
 export type ScreenerName = (typeof SCREENERS)[number];
 
@@ -468,6 +470,74 @@ async function liquidityReversal(db: SupabaseClient<any>, direction: "bullish" |
   return writeResults(db, `${direction}_liquidity_reversal`, matches);
 }
 
+function ema(values: number[], period: number) {
+  if (values.length < period) return null;
+  const multiplier = 2 / (period + 1);
+  let result = values.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
+  for (const value of values.slice(period)) result = value * multiplier + result * (1 - multiplier);
+  return result;
+}
+
+/** Present close above EMA50 > EMA100 > EMA200. */
+async function emaTrendBullish(db: SupabaseClient<any>) {
+  const byTicker = await loadDaily(db, 500);
+  const matches: any[] = [];
+  for (const [ticker, rows] of byTicker) {
+    if (rows.length < 220) continue;
+    const closes = rows.map((row) => row.close);
+    const current = rows.at(-1)!;
+    const ema50 = ema(closes, 50);
+    const ema100 = ema(closes, 100);
+    const ema200 = ema(closes, 200);
+    if (ema50 == null || ema100 == null || ema200 == null) continue;
+    if (current.close > ema50 && ema50 > ema100 && ema100 > ema200) {
+      matches.push({
+        ticker,
+        trigger_date: current.date,
+        details: {
+          trigger_close: current.close,
+          ema50,
+          ema100,
+          ema200,
+          alignment: "close > EMA50 > EMA100 > EMA200",
+        },
+      });
+    }
+  }
+  return writeResults(db, "ema_trend_bullish", matches);
+}
+
+/** Two consecutive closes below the previous candle low, then a close above the last candle high. */
+async function threeCandleBullishTurn(db: SupabaseClient<any>) {
+  const byTicker = await loadDaily(db, 60);
+  const matches: any[] = [];
+  for (const [ticker, rows] of byTicker) {
+    if (rows.length < 4) continue;
+    const before = rows.at(-3)!;
+    const last = rows.at(-2)!;
+    const present = rows.at(-1)!;
+    const firstBreakdown = before.close < rows.at(-4)!.low;
+    const secondBreakdown = last.close < before.low;
+    const bullishBreak = present.close > last.high;
+    if (!firstBreakdown || !secondBreakdown || !bullishBreak) continue;
+    matches.push({
+      ticker,
+      trigger_date: present.date,
+      details: {
+        trigger_close: present.close,
+        before_date: before.date,
+        last_date: last.date,
+        before_close: before.close,
+        last_close: last.close,
+        last_high: last.high,
+        breakout_pct: pct(present.close, last.high),
+        pattern: "two breakdown closes followed by bullish break above last high",
+      },
+    });
+  }
+  return writeResults(db, "three_candle_bullish_turn", matches);
+}
+
 export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, params: any = {}) {
   switch (name) {
     case "ath_breakout":
@@ -488,6 +558,10 @@ export async function runScreener(db: SupabaseClient<any>, name: ScreenerName, p
       return liquidityReversal(db, "bullish", params);
     case "bearish_liquidity_reversal":
       return liquidityReversal(db, "bearish", params);
+    case "ema_trend_bullish":
+      return emaTrendBullish(db);
+    case "three_candle_bullish_turn":
+      return threeCandleBullishTurn(db);
   }
 }
 
