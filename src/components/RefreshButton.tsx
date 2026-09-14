@@ -22,10 +22,12 @@ export function RefreshButton({ compact = false }: { compact?: boolean }) {
       let offset = 0;
       let total = Infinity;
       const failed: string[] = [];
+      const failureReasons: string[] = [];
       while (offset < total) {
         const res: any = await chunk({ data: { offset, limit: CHUNK } });
         total = res.total ?? 0;
         failed.push(...(res.failed ?? []));
+        failureReasons.push(...(res.failures ?? []));
         offset += CHUNK;
         setProgress(`prices ${Math.min(offset, total)}/${total}`);
       }
@@ -33,14 +35,22 @@ export function RefreshButton({ compact = false }: { compact?: boolean }) {
       await screeners({});
       await qc.invalidateQueries();
       toast.success(
-        failed.length ? `Refresh done — ${failed.length} tickers failed` : "Data refreshed and screeners updated",
+        failed.length
+          ? `Refresh done — ${failed.length} tickers failed${failureReasons[0] ? `: ${failureReasons[0]}` : ""}`
+          : "Data refreshed and screeners updated",
       );
     } catch (err: any) {
-      const msg = String(err?.message ?? "");
+      const msg = String(
+        err?.message ??
+          err?.cause?.message ??
+          err?.data?.message ??
+          err?.data?.error ??
+          (typeof err === "string" ? err : ""),
+      );
       if (msg.includes("Admin access") || msg.includes("Unauthorized") || err?.status === 401) {
         toast.error("Sign in as the admin to refresh market data.");
       } else {
-        toast.error(msg || "Refresh failed");
+        toast.error(msg || "Refresh failed. Check Admin > Data & Refresh > Logs for details.");
       }
     } finally {
       setProgress(null);

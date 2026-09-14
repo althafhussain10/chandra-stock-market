@@ -570,11 +570,14 @@ export async function logRun(
   jobName: string,
   fn: () => Promise<{ rows: number; failed?: string[] }>,
 ) {
-  const { data: log } = await db
+  const { data: log, error: insertError } = await db
     .from("run_logs")
     .insert({ job_name: jobName, status: "running" })
     .select("id")
     .single();
+  if (insertError || !log) {
+    throw new Error(`Could not create screener run log: ${insertError?.message ?? "no log row returned"}`);
+  }
   try {
     const res = await fn();
     await db

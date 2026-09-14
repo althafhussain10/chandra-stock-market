@@ -83,9 +83,10 @@ export const runAllScreeners = createServerFn({ method: "POST" })
       out[cfg.name] = `error: ${err?.message ?? err}`;
     }
   }
-  await db
+  const { error: settingsError } = await db
     .from("app_settings")
     .upsert({ key: "last_refresh", value: { at: new Date().toISOString() }, updated_at: new Date().toISOString() });
+  if (settingsError) throw new Error(`Could not save refresh timestamp: ${settingsError.message}`);
   return out;
   });
 

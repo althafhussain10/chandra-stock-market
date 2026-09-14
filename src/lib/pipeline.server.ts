@@ -131,6 +131,7 @@ export async function refreshMarketData(
   const total = all.length;
 
   const failed: string[] = [];
+  const failures: string[] = [];
   let rows = 0;
 
   await mapLimit(tickers, 6, async (ticker) => {
@@ -193,9 +194,10 @@ export async function refreshMarketData(
       rows += monthly.length;
     } catch (err) {
       failed.push(ticker);
+      failures.push(`${ticker}: ${err instanceof Error ? err.message : String(err)}`);
       console.error("refresh failed", ticker, err);
     }
   });
 
-  return { rows, failed, tickers: tickers.length, total };
+  return { rows, failed, failures, tickers: tickers.length, total };
 }
