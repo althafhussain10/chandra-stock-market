@@ -34,11 +34,16 @@ export function RefreshButton({ compact = false }: { compact?: boolean }) {
       setProgress("running screeners…");
       await screeners({});
       await qc.invalidateQueries();
-      toast.success(
-        failed.length
-          ? `Refresh done — ${failed.length} tickers failed${failureReasons[0] ? `: ${failureReasons[0]}` : ""}`
-          : "Data refreshed and screeners updated",
-      );
+      if (failed.length) {
+        const allFailed = failed.length >= total && total > 0;
+        toast.error(
+          allFailed
+            ? `Refresh failed — all ${failed.length} tickers failed. ${failureReasons[0] ?? "Check the refresh logs for details."}`
+            : `Refresh completed with errors — ${failed.length} of ${total} tickers failed. ${failureReasons[0] ?? "Check the refresh logs for details."}`,
+        );
+      } else {
+        toast.success("Data refreshed and screeners updated");
+      }
     } catch (err: any) {
       const msg = String(
         err?.message ??
