@@ -539,33 +539,42 @@ function findAutoTrendLine(points: CandlePoint[], kind: "support" | "resistance"
 function StockChart({ ticker, sector, label, onClose }: { ticker: string | null; sector: string | null; label: string; onClose: () => void }) {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>("daily");
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(1);
   const [showSupport, setShowSupport] = useState(true);
   const [showResistance, setShowResistance] = useState(true);
   const [showTrendlines, setShowTrendlines] = useState(true);
   const { data, isLoading, error } = useChartCandles(ticker, timeframe);
   const sectorChart = useSectorChartCandles(sector, timeframe);
   const points = (ticker ? data ?? [] : sectorChart.data ?? []) as CandlePoint[];
+  const visibleCount = Math.max(20, Math.round(points.length / zoom));
+  const visibleStart = Math.max(0, points.length - visibleCount);
+  const visiblePoints = points.slice(visibleStart);
   const chartLoading = ticker ? isLoading : sectorChart.isLoading;
   const chartError = ticker ? error : sectorChart.error;
-  const support = findLevel(points, "support");
-  const resistance = findLevel(points, "resistance");
-  const supportTrend = findAutoTrendLine(points, "support");
-  const resistanceTrend = findAutoTrendLine(points, "resistance");
-  const pattern = findBreakoutRetest(points, resistance);
+  const support = findLevel(visiblePoints, "support");
+  const resistance = findLevel(visiblePoints, "resistance");
+  const supportTrend = findAutoTrendLine(visiblePoints, "support");
+  const resistanceTrend = findAutoTrendLine(visiblePoints, "resistance");
+  const pattern = findBreakoutRetest(visiblePoints, resistance);
   const width = 980;
   const height = 420;
   const pad = { top: 24, right: 72, bottom: 34, left: 56 };
   const chartWidth = width - pad.left - pad.right;
   const chartHeight = height - pad.top - pad.bottom;
-  const min = points.length ? Math.min(...points.map((point) => point.low), support ?? Infinity) : 0;
-  const max = points.length ? Math.max(...points.map((point) => point.high), resistance ?? -Infinity) : 1;
+  const min = visiblePoints.length ? Math.min(...visiblePoints.map((point) => point.low), support ?? Infinity) : 0;
+  const max = visiblePoints.length ? Math.max(...visiblePoints.map((point) => point.high), resistance ?? -Infinity) : 1;
   const y = (value: number) => pad.top + ((max - value) / Math.max(max - min, 1)) * chartHeight;
-  const x = (index: number) => pad.left + (index / Math.max(points.length - 1, 1)) * chartWidth;
-  const candleWidth = Math.max(3, Math.min(12, chartWidth / Math.max(points.length, 1) * 0.62));
+  const x = (index: number) => pad.left + (index / Math.max(visiblePoints.length - 1, 1)) * chartWidth;
+  const candleWidth = Math.max(3, Math.min(12, chartWidth / Math.max(visiblePoints.length, 1) * 0.62));
   const projectTrend = (line: TrendLine) => {
     const slope = (line.lastValue - line.firstValue) / Math.max(line.lastIndex - line.firstIndex, 1);
-    return line.lastValue + slope * (points.length - 1 - line.lastIndex);
+    return line.lastValue + slope * (visiblePoints.length - 1 - line.lastIndex);
   };
+
+  function changeZoom(amount: number) {
+    setHoveredIndex(null);
+    setZoom((value) => Math.min(5, Math.max(1, Number((value + amount).toFixed(2)))));
+  }
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -595,6 +604,12 @@ function StockChart({ ticker, sector, label, onClose }: { ticker: string | null;
           <label className="flex cursor-pointer items-center gap-1.5 text-up"><input type="checkbox" checked={showSupport} onChange={(event) => setShowSupport(event.target.checked)} /> Support</label>
           <label className="flex cursor-pointer items-center gap-1.5 text-down"><input type="checkbox" checked={showResistance} onChange={(event) => setShowResistance(event.target.checked)} /> Resistance</label>
           <label className="flex cursor-pointer items-center gap-1.5 text-primary"><input type="checkbox" checked={showTrendlines} onChange={(event) => setShowTrendlines(event.target.checked)} /> Auto trendlines</label>
+          <div className="ml-auto flex items-center gap-1">
+            <button type="button" onClick={() => changeZoom(0.5)} className="rounded border border-border px-2 py-1 text-sm hover:bg-accent" aria-label="Zoom in">+</button>
+            <button type="button" onClick={() => changeZoom(-0.5)} className="rounded border border-border px-2 py-1 text-sm hover:bg-accent" aria-label="Zoom out">−</button>
+            <button type="button" onClick={() => setZoom(1)} className="rounded border border-border px-2 py-1 text-xs hover:bg-accent">Reset</button>
+            <span className="num text-muted-foreground">{Math.round(visiblePoints.length)} candles</span>
+          </div>
         </div>
         {chartLoading ? (
           <div className="flex h-80 items-center justify-center text-sm text-muted-foreground">Loading candles...</div>
@@ -610,12 +625,12 @@ function StockChart({ ticker, sector, label, onClose }: { ticker: string | null;
               {pattern?.retestIndex != null && <span className="text-primary">Breakout retest detected</span>}
             </div>
             <div className="relative chart-fade-in">
-              <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-h-80 w-full rounded-md border border-border bg-background" role="img" aria-label={`${label} ${timeframe} candlestick chart`} onMouseLeave={() => setHoveredIndex(null)}>
+              <svg viewBox={`0 0 ${width} ${height}`} className="h-auto min-h-80 w-full rounded-md border border-border bg-background" role="img" aria-label={`${label} ${timeframe} candlestick chart`} onWheel={(event) => { event.preventDefault(); changeZoom(event.deltaY < 0 ? 0.25 : -0.25); }} onMouseLeave={() => setHoveredIndex(null)}>
               {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
                 const value = max - (max - min) * fraction;
                 return <g key={fraction}><line x1={pad.left} x2={width - pad.right} y1={y(value)} y2={y(value)} stroke="var(--color-border)" strokeDasharray="3 5" /><text x={width - pad.right + 8} y={y(value) + 4} fill="var(--color-muted-foreground)" fontSize="10">{fmtNum(value, 0)}</text></g>;
               })}
-              {points.map((point, index) => {
+              {visiblePoints.map((point, index) => {
                 const rising = point.close >= point.open;
                 const candleX = x(index);
                 const bodyTop = y(Math.max(point.open, point.close));
@@ -627,11 +642,11 @@ function StockChart({ ticker, sector, label, onClose }: { ticker: string | null;
               {showTrendlines && supportTrend && <><line className="chart-draw-line" x1={x(supportTrend.firstIndex)} y1={y(supportTrend.firstValue)} x2={width - pad.right} y2={y(projectTrend(supportTrend))} stroke="var(--color-up)" strokeWidth="2" /><text x={width - pad.right - 4} y={y(projectTrend(supportTrend)) - 6} fill="var(--color-up)" fontSize="10" textAnchor="end">AUTO SUPPORT TRENDLINE</text></>}
               {showTrendlines && resistanceTrend && <><line className="chart-draw-line" x1={x(resistanceTrend.firstIndex)} y1={y(resistanceTrend.firstValue)} x2={width - pad.right} y2={y(projectTrend(resistanceTrend))} stroke="var(--color-down)" strokeWidth="2" /><text x={width - pad.right - 4} y={y(projectTrend(resistanceTrend)) - 6} fill="var(--color-down)" fontSize="10" textAnchor="end">AUTO RESISTANCE TRENDLINE</text></>}
               {pattern?.retestIndex != null && resistance != null && <><line x1={x(pattern.resistanceIndex)} x2={x(pattern.retestIndex)} y1={y(resistance)} y2={y(resistance)} stroke="var(--color-primary)" strokeWidth="2" /><text x={x(pattern.breakoutIndex)} y={y(resistance) - 10} fill="var(--color-primary)" fontSize="11" textAnchor="middle">BREAKOUT</text><text x={x(pattern.retestIndex)} y={y(resistance) + 18} fill="var(--color-primary)" fontSize="11" textAnchor="middle">RETEST AS SUPPORT</text></>}
-              {points.filter((_, index) => index === 0 || index === points.length - 1 || index % Math.max(1, Math.floor(points.length / 6)) === 0).map((point) => <text key={`label-${point.date}`} x={x(points.indexOf(point))} y={height - 10} fill="var(--color-muted-foreground)" fontSize="10" textAnchor="middle">{point.date.slice(0, 7)}</text>)}
+              {visiblePoints.filter((_, index) => index === 0 || index === visiblePoints.length - 1 || index % Math.max(1, Math.floor(visiblePoints.length / 6)) === 0).map((point) => <text key={`label-${point.date}`} x={x(visiblePoints.indexOf(point))} y={height - 10} fill="var(--color-muted-foreground)" fontSize="10" textAnchor="middle">{point.date.slice(0, 7)}</text>)}
             </svg>
-            {hoveredIndex != null && points[hoveredIndex] && <div className="pointer-events-none absolute z-10 min-w-36 -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg" style={{ left: `${(x(hoveredIndex) / width) * 100}%`, top: `${Math.max(2, (y(points[hoveredIndex].high) / height) * 100)}%` }}>
-              <div className="mb-1 font-medium">{points[hoveredIndex].date}</div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 num text-[11px]"><span>Open</span><span className="text-right">{fmtNum(points[hoveredIndex].open)}</span><span>High</span><span className="text-right">{fmtNum(points[hoveredIndex].high)}</span><span>Low</span><span className="text-right">{fmtNum(points[hoveredIndex].low)}</span><span>Close</span><span className="text-right">{fmtNum(points[hoveredIndex].close)}</span><span>Volume</span><span className="text-right">{fmtInt(points[hoveredIndex].volume)}</span></div>
+            {hoveredIndex != null && visiblePoints[hoveredIndex] && <div className="pointer-events-none absolute z-10 min-w-36 -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg" style={{ left: `${(x(hoveredIndex) / width) * 100}%`, top: `${Math.max(2, (y(visiblePoints[hoveredIndex].high) / height) * 100)}%` }}>
+              <div className="mb-1 font-medium">{visiblePoints[hoveredIndex].date}</div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 num text-[11px]"><span>Open</span><span className="text-right">{fmtNum(visiblePoints[hoveredIndex].open)}</span><span>High</span><span className="text-right">{fmtNum(visiblePoints[hoveredIndex].high)}</span><span>Low</span><span className="text-right">{fmtNum(visiblePoints[hoveredIndex].low)}</span><span>Close</span><span className="text-right">{fmtNum(visiblePoints[hoveredIndex].close)}</span><span>Volume</span><span className="text-right">{fmtInt(visiblePoints[hoveredIndex].volume)}</span></div>
             </div>}
             </div>
           </div>
