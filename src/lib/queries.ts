@@ -146,7 +146,7 @@ export function useSectorChartCandles(sector: string | null, timeframe: ChartTim
       if (error) throw error;
       const grouped = new Map<string, any[]>();
       for (const row of data ?? []) {
-        const date = row[dateColumn];
+        const date = (row as unknown as Record<string, unknown>)[dateColumn] as string;
         const values = grouped.get(date) ?? [];
         values.push(row);
         grouped.set(date, values);
@@ -181,14 +181,14 @@ export function useFundamentals(statement: string) {
     queryKey: ["fundamentals", statement],
     queryFn: async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await (supabase as any)
           .from("fundamental_statements")
           .select("ticker,metrics,fiscal_year")
           .eq("statement_type", statement)
           .order("fiscal_year", { ascending: false })
           .limit(200);
         if (error) throw error;
-        return (data ?? []).map((row) => ({
+        return (data ?? []).map((row: any) => ({
           ticker: row.ticker,
           fiscalYear: row.fiscal_year,
           metrics: row.metrics ?? {},

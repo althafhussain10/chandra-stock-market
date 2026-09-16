@@ -175,7 +175,7 @@ function UniverseSection() {
   async function uploadCsv(mode: "append" | "replace") {
     const lines = csv.trim().split(/\r?\n/).filter(Boolean);
     if (lines.length === 0) return void toast.error("Paste CSV rows first");
-    const header = parseCsvLine(lines[0] ?? []).map((cell) => cell.toLowerCase());
+    const header = parseCsvLine(lines[0] ?? "").map((cell) => cell.toLowerCase());
     const symbolIndex = Math.max(0, header.findIndex((cell) => cell === "symbol" || cell === "ticker"));
     const nameIndex = Math.max(0, header.findIndex((cell) => cell === "company name" || cell === "name"));
     const exchangeIndex = header.findIndex((cell) => cell === "exchange");

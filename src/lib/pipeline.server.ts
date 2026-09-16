@@ -13,41 +13,64 @@ export type Candle = {
   volume: number;
 };
 
-const YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart";
+const YAHOO_HOSTS = [
+  "https://query1.finance.yahoo.com/v8/finance/chart",
+  "https://query2.finance.yahoo.com/v8/finance/chart",
+];
 
-export async function fetchDaily(ticker: string, range = "5y"): Promise<Candle[]> {
-  const url = `${YAHOO}/${encodeURIComponent(ticker)}?range=${range}&interval=1d`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-      Accept: "application/json",
-    },
-  });
-  if (!res.ok) throw new Error(`Yahoo ${res.status} for ${ticker}`);
-  const json = (await res.json()) as any;
-  const result = json?.chart?.result?.[0];
-  if (!result) throw new Error(`No data for ${ticker}`);
-  const ts: number[] = result.timestamp ?? [];
-  const q = result.indicators?.quote?.[0] ?? {};
-  const out: Candle[] = [];
-  for (let i = 0; i < ts.length; i++) {
-    const o = q.open?.[i],
-      h = q.high?.[i],
-      l = q.low?.[i],
-      c = q.close?.[i],
-      v = q.volume?.[i];
-    if (o == null || h == null || l == null || c == null) continue;
-    out.push({
-      date: new Date(ts[i]! * 1000).toISOString().slice(0, 10),
-      open: o,
-      high: h,
-      low: l,
-      close: c,
-      volume: v ?? 0,
-    });
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function fetchDaily(ticker: string, range = "2y"): Promise<Candle[]> {
+  let lastError = "unknown error";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    for (const host of YAHOO_HOSTS) {
+      const url = `${host}/${encodeURIComponent(ticker)}?range=${range}&interval=1d`;
+      try {
+        const res = await fetch(url, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            Accept: "application/json",
+          },
+        });
+        if (!res.ok) {
+          lastError = `Yahoo ${res.status} for ${ticker}`;
+          continue;
+        }
+        const json = (await res.json()) as any;
+        const result = json?.chart?.result?.[0];
+        if (!result) {
+          lastError = `Yahoo returned no data for ${ticker}`;
+          continue;
+        }
+        const ts: number[] = result.timestamp ?? [];
+        const q = result.indicators?.quote?.[0] ?? {};
+        const out: Candle[] = [];
+        for (let i = 0; i < ts.length; i++) {
+          const o = q.open?.[i],
+            h = q.high?.[i],
+            l = q.low?.[i],
+            c = q.close?.[i],
+            v = q.volume?.[i];
+          if (o == null || h == null || l == null || c == null) continue;
+          out.push({
+            date: new Date(ts[i]! * 1000).toISOString().slice(0, 10),
+            open: o,
+            high: h,
+            low: l,
+            close: c,
+            volume: v ?? 0,
+          });
+        }
+        if (out.length) return out;
+        lastError = `Yahoo returned an empty series for ${ticker}`;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (attempt < 2) await wait(400 * 2 ** attempt);
   }
-  return out;
+  throw new Error(lastError);
 }
 
 function isoWeekKey(d: Date) {
@@ -199,5 +222,20 @@ export async function refreshMarketData(
     }
   });
 
-  return { rows, failed, failures, tickers: tickers.length, total };
+  const { data: latest, error: latestError } = await db
+    .from("daily_candles")
+    .select("date")
+    .order("date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestError) throw new Error(latestError.message);
+
+  return {
+    rows,
+    failed,
+    failures,
+    tickers: tickers.length,
+    total,
+    latestDate: latest?.date ?? null,
+  };
 }

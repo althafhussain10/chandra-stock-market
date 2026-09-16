@@ -64,6 +64,10 @@ async function activeTickers(db: SupabaseClient<any>) {
   return data ?? [];
 }
 
+function latestTradingDate(rows: Row[]) {
+  return rows.length ? rows[rows.length - 1]!.date : new Date().toISOString().slice(0, 10);
+}
+
 async function writeResults(
   db: SupabaseClient<any>,
   screener: ScreenerName,
@@ -280,7 +284,7 @@ async function sectorStrength(db: SupabaseClient<any>, params: any) {
   }
 
   const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = latestTradingDate([...daily.values()].flat());
   const rowsOut = [...groups.entries()].map(([k, acc]) => {
     const [sector, subsector] = k.split("||");
     const thisWeek = avg(acc.wThis);
@@ -325,7 +329,7 @@ async function supportTouchedTurnBullish(db: SupabaseClient<any>, params: any) {
 
     const nearSupport = current.low <= supportLine * (1 + supportBuffer / 100);
     const bullishReversal = current.close > prevDay.close && current.close > supportLine * (1 + minBullish / 100);
-    const shortTrend = current.close > prev[0].close;
+    const shortTrend = current.close > prev[0]!.close;
     const avgTrend =
       prev.slice(-5).reduce((sum, r) => sum + r.close, 0) / 5 >
       prev.slice(-10, -5).reduce((sum, r) => sum + r.close, 0) / 5;

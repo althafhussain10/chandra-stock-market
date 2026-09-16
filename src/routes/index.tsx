@@ -473,13 +473,13 @@ function Pct({ value }: { value: number | null | undefined }) {
 type CandlePoint = { date: string; open: number; high: number; low: number; close: number; volume: number };
 
 class ChartErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
-  state = { hasError: false };
+  override state = { hasError: false };
 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
 
-  render() {
+  override render() {
     if (this.state.hasError) {
       return <div className="flex h-80 items-center justify-center text-sm text-destructive">Chart data could not be displayed for this selection.</div>;
     }

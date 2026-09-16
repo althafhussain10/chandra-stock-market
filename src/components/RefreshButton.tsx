@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { refreshChunk, runAllScreeners, seedUniverse } from "@/lib/data.functions";
 
-const CHUNK = 20;
+const CHUNK = 40;
 
 export function RefreshButton({ compact = false }: { compact?: boolean }) {
   const seed = useServerFn(seedUniverse);
@@ -21,6 +21,7 @@ export function RefreshButton({ compact = false }: { compact?: boolean }) {
       await seed({});
       let offset = 0;
       let total = Infinity;
+      let latestDate: string | null = null;
       const failed: string[] = [];
       const failureReasons: string[] = [];
       while (offset < total) {
@@ -28,8 +29,11 @@ export function RefreshButton({ compact = false }: { compact?: boolean }) {
         total = res.total ?? 0;
         failed.push(...(res.failed ?? []));
         failureReasons.push(...(res.failures ?? []));
+        if (res.latestDate) latestDate = res.latestDate;
         offset += CHUNK;
-        setProgress(`prices ${Math.min(offset, total)}/${total}`);
+        setProgress(
+          latestDate ? `prices ${Math.min(offset, total)}/${total} · latest ${latestDate}` : `prices ${Math.min(offset, total)}/${total}`,
+        );
       }
       setProgress("running screeners…");
       await screeners({});
@@ -42,7 +46,11 @@ export function RefreshButton({ compact = false }: { compact?: boolean }) {
             : `Refresh completed with errors — ${failed.length} of ${total} tickers failed. ${failureReasons[0] ?? "Check the refresh logs for details."}`,
         );
       } else {
-        toast.success("Data refreshed and screeners updated");
+        toast.success(
+          latestDate
+            ? `Data refreshed and screeners updated. Latest trading day: ${latestDate}`
+            : "Data refreshed and screeners updated.",
+        );
       }
     } catch (err: any) {
       const msg = String(
